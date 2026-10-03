@@ -152,14 +152,6 @@ bool OpenModelFile(int itemType, const ItemModelDefinition& model, const LookNam
 
 bool OpenModel(int itemType, const ItemModelDefinition& model, const LookNames& lookNames)
 {
-    const LocalItemRow* local = FindLocalItemModel(itemType);
-    if (local != nullptr && !local->modelFile.empty() && local->modelFile != model.file)
-    {
-        if (OpenModelFile(itemType, model, lookNames, local->modelFile))
-        {
-            return true;
-        }
-    }
     if (OpenModelFile(itemType, model, lookNames, model.file))
     {
         return true;
@@ -268,7 +260,8 @@ std::wstring TextureFolderOfModel(const std::string& modelFile)
 
 void OpenLocalItemFile(const LocalItemRow& item, std::map<std::string, int, std::less<>>& openedByPath)
 {
-    if (!IsValidItemType(item.itemType) || item.modelFile.empty() || g_ItemModelDatabase.Find(item.itemType) != nullptr)
+    if (!IsValidItemType(item.itemType) || item.modelFile.empty() || g_ItemDatabase.Find(item.itemType) != nullptr ||
+        g_ItemModelDatabase.Find(item.itemType) != nullptr)
     {
         return;
     }
@@ -306,7 +299,8 @@ void OpenLocalItemTextures()
     std::map<std::string, int, std::less<>> textured;
     for (const LocalItemRow& item : StoredLocalItems())
     {
-        if (!IsValidItemType(item.itemType) || g_ItemModelDatabase.Find(item.itemType) != nullptr)
+        if (!IsValidItemType(item.itemType) || g_ItemDatabase.Find(item.itemType) != nullptr ||
+            g_ItemModelDatabase.Find(item.itemType) != nullptr)
         {
             continue;
         }

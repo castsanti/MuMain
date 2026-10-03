@@ -233,6 +233,11 @@ void ApplySeason21ItemTable()
         {
             continue;
         }
+        // Defined items keep the Season 6 numbers the server sends.
+        if (g_ItemDatabase.Find(item.itemType) != nullptr)
+        {
+            continue;
+        }
         ItemAttribute[item.itemType].Width = static_cast<BYTE>(item.width);
         ItemAttribute[item.itemType].Height = static_cast<BYTE>(item.height);
         ++sized;
@@ -282,6 +287,10 @@ void CItemDataHandler::OnLocaleChanged(void* context) noexcept
     for (const LocalItemRow& item : StoredLocalItems())
     {
         if (!IsValidItemType(item.itemType) || item.width <= 0 || item.height <= 0)
+        {
+            continue;
+        }
+        if (g_ItemDatabase.Find(item.itemType) != nullptr)
         {
             continue;
         }

@@ -66,23 +66,24 @@ TEST_CASE("a row that cannot be an inventory item is not a Season 21 table")
     CHECK(document.items.empty());
 }
 
-TEST_CASE("equipment uses the local packing when the section slot has no size")
+TEST_CASE("server item group and number stay on the Season 6 index")
 {
-    CHECK(Data::Items::ChooseEquipmentItemType(2, 0, true, true) == 1024);
-    CHECK(Data::Items::ChooseEquipmentItemType(2, 0, false, true) == 512);
-    CHECK(Data::Items::ChooseEquipmentItemType(1, 0, true, false) == 512);
+    CHECK(Data::Items::ChooseEquipmentItemType(14, 13) == 14 * 512 + 13);
+    CHECK(Data::Items::ChooseEquipmentItemType(7, 13) == 7 * 512 + 13);
+    CHECK(Data::Items::ChooseEquipmentItemType(2, 0) == 1024);
+    CHECK(Data::Items::ChooseEquipmentItemType(1, 0) == 512);
 }
 
-TEST_CASE("a Season 21 row wins when the section slot is a different item")
+TEST_CASE("a file row at the 256 packing does not move a jewel onto a helm")
 {
     Data::Items::LocalItemRow row;
-    row.itemType = 512;
-    row.width = 2;
-    row.height = 4;
-    row.modelFile = "Data/Item/Axe01.bmd";
+    row.itemType = 14 * 256 + 13;
+    row.width = 1;
+    row.height = 1;
+    row.modelFile = "Data/Item/Jewel01.bmd";
     Data::Items::SetLocalItemModels({row});
 
-    CHECK(Data::Items::ChooseEquipmentItemType(2, 0, true, true) == 512);
+    CHECK(Data::Items::ChooseEquipmentItemType(14, 13) == 14 * 512 + 13);
     CHECK(Data::Items::StoredLocalItems().size() == 1);
 
     Data::Items::SetLocalItemModels({});

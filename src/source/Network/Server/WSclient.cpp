@@ -2378,13 +2378,7 @@ void ReceiveChangePlayer(std::span<const BYTE> ReceiveBuffer)
     CHARACTER* c = &CharactersClient[FindCharacterIndex(Key)];
     OBJECT* o = &c->Object;
 
-    const int sectionType = (Data->ItemGroup & 0x0F) * MAX_ITEM_INDEX + Data->ItemNumber;
-    const int packedType = Data->ItemGroup * 256 + Data->ItemNumber;
-    const bool sectionHasSize =
-        Data::Items::IsValidItemType(sectionType) && ItemAttribute != nullptr && ItemAttribute[sectionType].Width > 0;
-    const bool packedHasSize =
-        Data::Items::IsValidItemType(packedType) && ItemAttribute != nullptr && ItemAttribute[packedType].Width > 0;
-    int Type = Data::Items::ChooseEquipmentItemType(Data->ItemGroup, Data->ItemNumber, sectionHasSize, packedHasSize);
+    int Type = Data::Items::ChooseEquipmentItemType(Data->ItemGroup, Data->ItemNumber);
     // BYTE Level = Data->Item[1] & 0xf;
     // BYTE Option = Data->Item[3] & 63;
     // BYTE ExtOption = Data->Item[4];
