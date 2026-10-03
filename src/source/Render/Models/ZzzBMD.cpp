@@ -27,6 +27,7 @@
 #include "Engine/Physics/PhysicsManager.h"
 #include "UI/NewUI/NewUISystem.h"
 #include "Render/Models/BmdContainer.h"
+#include "Render/Models/PlayerActionAlign.h"
 #include "Render/Models/GpuSkinningPath.h"
 #include "Render/Renderer/MuRenderer.h"
 #include "Render/Renderer/RenderUtils.h"
@@ -3167,6 +3168,133 @@ static_assert(sizeof(Triangle_t2) == Render::Models::kBmdTriangleStride);
 static_assert(sizeof(vec3_t) == Render::Models::kBmdVec3Stride);
 static_assert(sizeof(bool) == 1);
 
+namespace
+{
+
+bool IsPlayerModelFile(const wchar_t* fileName)
+{
+    if (fileName == nullptr)
+    {
+        return false;
+    }
+    const wchar_t* base = fileName;
+    if (const wchar_t* slash = wcsrchr(fileName, L'\\'))
+    {
+        base = slash + 1;
+    }
+    if (const wchar_t* slash = wcsrchr(base, L'/'))
+    {
+        base = slash + 1;
+    }
+    return _wcsicmp(base, L"player.bmd") == 0;
+}
+
+std::uint32_t MotionCrc(const BMD& model, int action)
+{
+    const int keys = model.Actions[action].NumAnimationKeys;
+    if (keys <= 0)
+    {
+        return 0;
+    }
+    std::uint32_t crc = 0;
+    for (int bone = 0; bone < model.NumBones; ++bone)
+    {
+        if (model.Bones[bone].Dummy || model.Bones[bone].BoneMatrixes == nullptr)
+        {
+            continue;
+        }
+        const BoneMatrix_t& matrix = model.Bones[bone].BoneMatrixes[action];
+        if (matrix.Position == nullptr || matrix.Rotation == nullptr)
+        {
+            continue;
+        }
+        crc = Render::Models::HashPlayerMotion(crc, matrix.Position, sizeof(vec3_t) * static_cast<std::size_t>(keys));
+        crc = Render::Models::HashPlayerMotion(crc, matrix.Rotation, sizeof(vec3_t) * static_cast<std::size_t>(keys));
+    }
+    return crc;
+}
+
+void ApplyActionOrder(BMD& model, const std::vector<int>& order)
+{
+    std::vector<Action_t> actions(static_cast<std::size_t>(model.NumActions));
+    for (int i = 0; i < model.NumActions; ++i)
+    {
+        actions[static_cast<std::size_t>(i)] = model.Actions[order[static_cast<std::size_t>(i)]];
+    }
+    std::memcpy(model.Actions, actions.data(), sizeof(Action_t) * static_cast<std::size_t>(model.NumActions));
+
+    for (int bone = 0; bone < model.NumBones; ++bone)
+    {
+        if (model.Bones[bone].Dummy || model.Bones[bone].BoneMatrixes == nullptr)
+        {
+            continue;
+        }
+        std::vector<BoneMatrix_t> matrices(static_cast<std::size_t>(model.NumActions));
+        for (int i = 0; i < model.NumActions; ++i)
+        {
+            matrices[static_cast<std::size_t>(i)] = model.Bones[bone].BoneMatrixes[order[static_cast<std::size_t>(i)]];
+        }
+        std::memcpy(model.Bones[bone].BoneMatrixes, matrices.data(),
+                    sizeof(BoneMatrix_t) * static_cast<std::size_t>(model.NumActions));
+    }
+}
+
+void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
+{
+    if (!IsPlayerModelFile(modelFileName) || model.NumActions <= Render::Models::kSeason6PlayerActionCount)
+    {
+        return;
+    }
+
+    std::vector<std::uint32_t> motion(static_cast<std::size_t>(model.NumActions));
+    for (int action = 0; action < model.NumActions; ++action)
+    {
+        motion[static_cast<std::size_t>(action)] = MotionCrc(model, action);
+    }
+
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount));
+    if (!Render::Models::MapSeason6PlayerActions(motion.data(), model.NumActions, season6ToLoaded.data()))
+    {
+        wprintf(L"[Open2] player.bmd has %d actions and does not match the Season 6 clips\n", model.NumActions);
+        return;
+    }
+
+    bool alreadyAligned = true;
+    for (int i = 0; i < Render::Models::kSeason6PlayerActionCount; ++i)
+    {
+        if (season6ToLoaded[static_cast<std::size_t>(i)] != i)
+        {
+            alreadyAligned = false;
+        }
+    }
+    if (alreadyAligned)
+    {
+        return;
+    }
+
+    std::vector<char> used(static_cast<std::size_t>(model.NumActions), 0);
+    std::vector<int> order(static_cast<std::size_t>(model.NumActions));
+    for (int i = 0; i < Render::Models::kSeason6PlayerActionCount; ++i)
+    {
+        const int loaded = season6ToLoaded[static_cast<std::size_t>(i)];
+        order[static_cast<std::size_t>(i)] = loaded;
+        used[static_cast<std::size_t>(loaded)] = 1;
+    }
+    int extra = Render::Models::kSeason6PlayerActionCount;
+    for (int i = 0; i < model.NumActions; ++i)
+    {
+        if (used[static_cast<std::size_t>(i)] == 0)
+        {
+            order[static_cast<std::size_t>(extra)] = i;
+            ++extra;
+        }
+    }
+    ApplyActionOrder(model, order);
+    wprintf(L"[Open2] Aligned Season 21 player.bmd actions (%d clips) to Season 6 indices\n", model.NumActions);
+}
+
+} // namespace
+
 bool BMD::Open2(const wchar_t* DirName, const wchar_t* ModelFileName, bool bReAlloc)
 {
     if (m_bCompletedAlloc)
@@ -3390,6 +3518,8 @@ bool BMD::Open2(const wchar_t* DirName, const wchar_t* ModelFileName, bool bReAl
             }
         }
     }
+
+    AlignSeason21PlayerActions(*this, ModelFileName);
 
     Init(false);
 

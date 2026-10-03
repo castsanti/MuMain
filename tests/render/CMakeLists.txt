@@ -15,6 +15,13 @@ mu_add_test(
 )
 
 mu_add_test(
+    NAME test_player_action_align
+    SOURCES
+        test_player_action_align.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Models/PlayerActionAlign.cpp
+)
+
+mu_add_test(
     NAME frame_pixel_readback_tests
     SOURCES
         test_frame_pixel_readback.cpp
