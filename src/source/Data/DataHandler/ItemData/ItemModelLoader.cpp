@@ -243,6 +243,93 @@ template <typename TOpen> void ForEachModel(TOpen&& open)
         }
     }
 }
+
+std::wstring TextureFolderOfModel(const std::string& modelFile)
+{
+    std::string path = modelFile;
+    std::replace(path.begin(), path.end(), '\\', '/');
+    if (path.rfind("Data/", 0) == 0 || path.rfind("data/", 0) == 0)
+    {
+        path.erase(0, 5);
+    }
+    const std::size_t slash = path.rfind('/');
+    if (slash == std::string::npos)
+    {
+        return L"Item\\";
+    }
+    path.resize(slash + 1);
+    std::wstring folder = ToLoaderPath(path);
+    if (folder.empty() || folder.back() != LoaderSeparator)
+    {
+        folder += LoaderSeparator;
+    }
+    return folder;
+}
+
+void OpenLocalItemFile(const LocalItemRow& item, std::map<std::string, int, std::less<>>& openedByPath)
+{
+    if (!IsValidItemType(item.itemType) || item.modelFile.empty() || g_ItemModelDatabase.Find(item.itemType) != nullptr)
+    {
+        return;
+    }
+    const int slot = ToModelSlot(item.itemType);
+    if (Models[slot].NumMeshs > 0)
+    {
+        return;
+    }
+    const auto [opened, isFirst] = openedByPath.try_emplace(item.modelFile, NotOpened);
+    if (!isFirst)
+    {
+        if (opened->second != NotOpened)
+        {
+            gLoadData.ShareModel(slot, opened->second);
+        }
+        return;
+    }
+    const std::wstring path = ToLoaderPath(item.modelFile);
+    const std::size_t nameStart = path.find_last_of(LoaderSeparator) + 1;
+    if (path.size() < nameStart + ModelFileExtension.size())
+    {
+        return;
+    }
+    const std::wstring folder = path.substr(0, nameStart);
+    const std::wstring name = path.substr(nameStart, path.size() - nameStart - ModelFileExtension.size());
+    if (!gLoadData.AccessModel(slot, folder.c_str(), name.c_str()))
+    {
+        return;
+    }
+    opened->second = slot;
+}
+
+void OpenLocalItemTextures()
+{
+    std::map<std::string, int, std::less<>> textured;
+    for (const LocalItemRow& item : StoredLocalItems())
+    {
+        if (!IsValidItemType(item.itemType) || g_ItemModelDatabase.Find(item.itemType) != nullptr)
+        {
+            continue;
+        }
+        const int slot = ToModelSlot(item.itemType);
+        if (Models[slot].NumMeshs <= 0 || Models[slot].SharesData())
+        {
+            continue;
+        }
+        if (!textured.try_emplace(item.modelFile, slot).second)
+        {
+            continue;
+        }
+        std::vector<std::wstring> folders;
+        const std::wstring folder = TextureFolderOfModel(item.modelFile);
+        folders.push_back(folder);
+        if (folder != L"Item\\")
+        {
+            folders.push_back(L"Item\\");
+        }
+        gLoadData.OpenTexture(slot, folders);
+    }
+}
+
 } // namespace
 
 void OpenModels(const LookNames& lookNames)
@@ -260,6 +347,11 @@ void OpenModels(const LookNames& lookNames)
                 OpenSharedModel(itemType, model, lookNames, sharedModelsOpenedBy);
             }
         });
+    std::map<std::string, int, std::less<>> localModelsOpenedBy;
+    for (const LocalItemRow& item : StoredLocalItems())
+    {
+        OpenLocalItemFile(item, localModelsOpenedBy);
+    }
 }
 
 void OpenTextures()
@@ -273,6 +365,7 @@ void OpenTextures()
                 OpenModelTextures(itemType, model);
             }
         });
+    OpenLocalItemTextures();
 }
 
 std::string TakeProblemMessage()

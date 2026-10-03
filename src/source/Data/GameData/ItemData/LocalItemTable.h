@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -32,10 +33,13 @@ void SetLocalItemModels(std::vector<LocalItemRow> items);
 
 const LocalItemRow* FindLocalItemModel(int itemType);
 
+std::span<const LocalItemRow> StoredLocalItems();
+
 // Equipment packets name an item as a group and a number. Season 6 packs that
 // as section * 512 + index. Season 21's local table packs the same item as
-// group * 256 + id. When only one of those slots has an inventory size, that
-// is the item. When both do, the section packing stays.
+// group * 256 + id. A row that exists only under the file packing wins, even
+// when the section slot has a size from the JSON item list. When both rows
+// exist, the section packing stays.
 int ChooseEquipmentItemType(int group, int number, bool sectionHasSize, bool packedHasSize);
 
 } // namespace Data::Items

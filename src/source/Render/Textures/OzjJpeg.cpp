@@ -91,4 +91,19 @@ bool ReadOzjJpeg(const std::uint8_t* file, std::size_t size, std::vector<std::ui
     return ExtractJpeg(plain.data(), plain.size(), jpeg);
 }
 
+bool ReadOzjJpegUnwrapped(const std::uint8_t* file, std::size_t size, std::vector<std::uint8_t>& jpeg)
+{
+    jpeg.clear();
+    if (file == nullptr || size <= kClassicHeaderBytes)
+    {
+        return false;
+    }
+    std::vector<std::uint8_t> plain;
+    if (!Render::Terrain::DecryptModulus(file, size, plain))
+    {
+        return false;
+    }
+    return ExtractJpeg(plain.data(), plain.size(), jpeg);
+}
+
 } // namespace Render::Textures

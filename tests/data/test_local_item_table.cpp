@@ -72,3 +72,18 @@ TEST_CASE("equipment uses the local packing when the section slot has no size")
     CHECK(Data::Items::ChooseEquipmentItemType(2, 0, false, true) == 512);
     CHECK(Data::Items::ChooseEquipmentItemType(1, 0, true, false) == 512);
 }
+
+TEST_CASE("a Season 21 row wins when the section slot is a different item")
+{
+    Data::Items::LocalItemRow row;
+    row.itemType = 512;
+    row.width = 2;
+    row.height = 4;
+    row.modelFile = "Data/Item/Axe01.bmd";
+    Data::Items::SetLocalItemModels({row});
+
+    CHECK(Data::Items::ChooseEquipmentItemType(2, 0, true, true) == 512);
+    CHECK(Data::Items::StoredLocalItems().size() == 1);
+
+    Data::Items::SetLocalItemModels({});
+}

@@ -275,6 +275,19 @@ void CItemDataHandler::OnLocaleChanged(void* context) noexcept
     auto* handler = static_cast<CItemDataHandler*>(context);
     g_ItemDatabase.SetDisplayLocale(I18N::GetCurrentLocale());
     handler->FillItemAttributes();
+    if (ItemAttribute == nullptr)
+    {
+        return;
+    }
+    for (const LocalItemRow& item : StoredLocalItems())
+    {
+        if (!IsValidItemType(item.itemType) || item.width <= 0 || item.height <= 0)
+        {
+            continue;
+        }
+        ItemAttribute[item.itemType].Width = static_cast<BYTE>(item.width);
+        ItemAttribute[item.itemType].Height = static_cast<BYTE>(item.height);
+    }
 }
 
 #ifdef _EDITOR

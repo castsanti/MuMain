@@ -134,18 +134,27 @@ std::wstring TextureFromModelPath(std::wstring path)
     return std::wstring(TextureRootFolder) + path;
 }
 
+bool IsJpegExtension(const wchar_t* extension)
+{
+    return _wcsicmp(extension, L".jpg") == 0 || _wcsicmp(extension, L".ozj") == 0;
+}
+
+bool IsTgaExtension(const wchar_t* extension)
+{
+    return _wcsicmp(extension, L".tga") == 0 || _wcsicmp(extension, L".ozt") == 0;
+}
+
 GLuint LoadFirstTexture(const std::vector<std::wstring>& paths, int wrap, int filter)
 {
     for (const std::wstring& path : paths)
     {
         wchar_t extension[_MAX_EXT] = {0};
         _wsplitpath(path.c_str(), nullptr, nullptr, nullptr, extension);
-        const wchar_t type = static_cast<wchar_t>(towlower(extension[1]));
-        if (type != L't' && type != L'j')
+        if (!IsJpegExtension(extension) && !IsTgaExtension(extension))
         {
             continue;
         }
-        const GLuint index = Bitmaps.LoadImage(path, type == L't' ? GL_NEAREST : filter, wrap);
+        const GLuint index = Bitmaps.LoadImage(path, IsTgaExtension(extension) ? GL_NEAREST : filter, wrap);
         if (index != BITMAP_UNKNOWN)
         {
             return index;
@@ -154,15 +163,14 @@ GLuint LoadFirstTexture(const std::vector<std::wstring>& paths, int wrap, int fi
     return BITMAP_UNKNOWN;
 }
 
-// Loads the texture from the first folder that has it. Only .tga and .jpg
-// files are loaded; for other files `current` is kept.
+// Loads the texture from the first folder that has it. JPEG and TGA names,
+// including the .ozj and .ozt containers, are loaded. Other files keep `current`.
 GLuint LoadTextureFromFolders(const std::wstring& textureFileName, std::span<const std::wstring> subFolders, int wrap,
                               int filter, GLuint current)
 {
     wchar_t extension[_MAX_EXT] = {0};
     _wsplitpath(textureFileName.c_str(), NULL, NULL, NULL, extension);
-    const wchar_t type = static_cast<wchar_t>(towlower(extension[1]));
-    if (type != L't' && type != L'j')
+    if (!IsJpegExtension(extension) && !IsTgaExtension(extension))
     {
         return current;
     }

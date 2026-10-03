@@ -569,9 +569,9 @@ bool CGlobalBitmap::LoadImage(GLuint uiBitmapIndex, const std::wstring& filename
     std::wstring ext;
     SplitExt(filename, ext, false);
 
-    if (0 == _wcsicmp(ext.c_str(), L"jpg"))
+    if (0 == _wcsicmp(ext.c_str(), L"jpg") || 0 == _wcsicmp(ext.c_str(), L"ozj"))
         return OpenJpegTurbo(uiBitmapIndex, filename, uiFilter, uiWrapMode);
-    else if (0 == _wcsicmp(ext.c_str(), L"tga"))
+    else if (0 == _wcsicmp(ext.c_str(), L"tga") || 0 == _wcsicmp(ext.c_str(), L"ozt"))
         return OpenTga(uiBitmapIndex, filename, uiFilter, uiWrapMode);
 
     return false;
@@ -798,7 +798,7 @@ bool CGlobalBitmap::OpenJpegTurbo(GLuint uiBitmapIndex, const std::wstring& file
     }
 
     const unsigned char* jpegData = jpegBytes.data();
-    const auto jpegSize = static_cast<unsigned long>(jpegBytes.size());
+    unsigned long jpegSize = static_cast<unsigned long>(jpegBytes.size());
 
     int jpegWidth = 0, jpegHeight = 0;
     int jpegSubsamp = TJSAMP_444;
@@ -813,6 +813,18 @@ bool CGlobalBitmap::OpenJpegTurbo(GLuint uiBitmapIndex, const std::wstring& file
 
     auto headerResult =
         tjDecompressHeader3(tjHandle.get(), jpegData, jpegSize, &jpegWidth, &jpegHeight, &jpegSubsamp, &jpegColorspace);
+    if (headerResult != 0 || jpegWidth <= 0 || jpegHeight <= 0 || jpegWidth > MAX_WIDTH || jpegHeight > MAX_HEIGHT)
+    {
+        std::vector<std::uint8_t> unwrapped;
+        if (Render::Textures::ReadOzjJpegUnwrapped(jpegBuf.data(), jpegBuf.size(), unwrapped))
+        {
+            jpegBytes.swap(unwrapped);
+            jpegData = jpegBytes.data();
+            jpegSize = static_cast<unsigned long>(jpegBytes.size());
+            headerResult = tjDecompressHeader3(tjHandle.get(), jpegData, jpegSize, &jpegWidth, &jpegHeight, &jpegSubsamp,
+                                               &jpegColorspace);
+        }
+    }
     if (headerResult != 0 || jpegWidth <= 0 || jpegHeight <= 0 || jpegWidth > MAX_WIDTH || jpegHeight > MAX_HEIGHT)
     {
         ReportTurboError(L"tjDecompressHeader3");

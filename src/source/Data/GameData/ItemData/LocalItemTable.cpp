@@ -171,10 +171,25 @@ const LocalItemRow* FindLocalItemModel(int itemType)
     return &*found;
 }
 
+std::span<const LocalItemRow> StoredLocalItems()
+{
+    return g_localItems;
+}
+
 int ChooseEquipmentItemType(int group, int number, bool sectionHasSize, bool packedHasSize)
 {
     const int sectionType = (group & 0x0F) * MAX_ITEM_INDEX + number;
     const int packedType = group * kGroupSpan + number;
+    const bool sectionInTable = FindLocalItemModel(sectionType) != nullptr;
+    const bool packedInTable = FindLocalItemModel(packedType) != nullptr;
+    if (packedInTable && !sectionInTable && IsValidItemType(packedType))
+    {
+        return packedType;
+    }
+    if (sectionInTable && IsValidItemType(sectionType))
+    {
+        return sectionType;
+    }
     if (packedHasSize && !sectionHasSize && IsValidItemType(packedType))
     {
         return packedType;
