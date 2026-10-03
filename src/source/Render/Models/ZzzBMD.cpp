@@ -26,6 +26,7 @@
 #include "Camera/CameraMove.h"
 #include "Engine/Physics/PhysicsManager.h"
 #include "UI/NewUI/NewUISystem.h"
+#include "Render/Models/BmdContainer.h"
 #include "Render/Models/GpuSkinningPath.h"
 #include "Render/Renderer/MuRenderer.h"
 #include "Render/Renderer/RenderUtils.h"
@@ -3159,6 +3160,13 @@ private:
 };
 
 
+static_assert(sizeof(Vertex_t) == Render::Models::kBmdVertexStride);
+static_assert(sizeof(Normal_t) == Render::Models::kBmdNormalStride);
+static_assert(sizeof(TexCoord_t) == Render::Models::kBmdTexCoordStride);
+static_assert(sizeof(Triangle_t2) == Render::Models::kBmdTriangleStride);
+static_assert(sizeof(vec3_t) == Render::Models::kBmdVec3Stride);
+static_assert(sizeof(bool) == 1);
+
 bool BMD::Open2(const wchar_t* DirName, const wchar_t* ModelFileName, bool bReAlloc)
 {
     if (m_bCompletedAlloc)
@@ -3183,6 +3191,14 @@ bool BMD::Open2(const wchar_t* DirName, const wchar_t* ModelFileName, bool bReAl
     int dataSize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
+    if (dataSize < 4)
+    {
+        fclose(fp);
+        wprintf(L"[Open2] ERROR: Invalid file header (expected 'BMD') in file %.64s\n", ModelPath);
+        m_bCompletedAlloc = false;
+        return false;
+    }
+
     std::unique_ptr<unsigned char[]> fileData(new(std::nothrow) unsigned char[dataSize]);
     if (!fileData)
     {
@@ -3194,63 +3210,50 @@ bool BMD::Open2(const wchar_t* DirName, const wchar_t* ModelFileName, bool bReAl
     fread(fileData.get(), 1, dataSize, fp);
     fclose(fp);
 
-    // *** Check the "BMD" header ***
-    if (!(fileData[0] == 'B' && fileData[1] == 'M' && fileData[2] == 'D'))
+    // Season 6 (12) and Season 21 (15) share the payload below. Season 8 (14)
+    // stays on the raw bytes after the version, as before.
+    Render::Models::BmdPlainPayload plain;
+    const auto containerStatus =
+        Render::Models::ReadBmdPlainPayload(fileData.get(), static_cast<std::size_t>(dataSize), plain);
+    Version = static_cast<char>(plain.version);
+
+    unsigned char* data = fileData.get();
+    int ptr = 4;
+    if (containerStatus == Render::Models::BmdContainerStatus::Ok)
     {
-        wprintf(L"[Open2] ERROR: Invalid file header (expected 'BMD') in file %.64s\n", ModelPath);
-        m_bCompletedAlloc = false;
-        return false;
-    }
-
-    int ptr = 3;
-    Version = fileData[ptr++];
-    
-
-    std::unique_ptr<unsigned char[]> decryptedData;
-    if (Version == 0xC)
-    {
-        //// wprintf(L"[Open2] Version: %d\n", Version);
-        // The on-disk size field is 32-bit; `long` is 8 bytes on LP64 (Linux
-        // x64), which would read past the field and produce a garbage size.
-        std::int32_t encSize = 0;
-        std::memcpy(&encSize, &fileData[ptr], sizeof(encSize));
-        ptr += sizeof(std::int32_t);
-        unsigned char* encData = &fileData[ptr];
-        //// wprintf(L"[Open2] Encrypted Size: %ld\n", encSize);
-
-        long decSize = MapFileDecrypt(nullptr, encData, encSize);
-        //// wprintf(L"[Open2] Decrypted Size: %ld\n", decSize);
-
-        decryptedData.reset(new(std::nothrow) unsigned char[decSize]);
-        if (!decryptedData)
+        if (plain.bytes.empty())
         {
+            wprintf(L"[Open2] ERROR: Invalid BMD payload in %.64s\n", ModelPath);
             m_bCompletedAlloc = false;
             return false;
         }
-
-        MapFileDecrypt(decryptedData.get(), encData, encSize);
+        data = plain.bytes.data();
         ptr = 0;
     }
-    else if (Version == 0xE)
+    else if (containerStatus == Render::Models::BmdContainerStatus::Unsupported)
     {
         wprintf(L"[Open2] Version: %d\n, not yet supported. File: %.64s\n", Version, ModelPath);
-        // FIXME FOR NEW MAPS 
+        // FIXME FOR NEW MAPS
         // DECRYPT KEY: webzen#@!01webzen#@!01webzen#@!0
     }
-    else if (Version == 0xA)
-    {
-        // wprintf(L"[Open2] Version: %d\n", Version);
-        ptr = 4;
-    }
-    else
+    else if (containerStatus == Render::Models::BmdContainerStatus::UnknownVersion)
     {
         wprintf(L"[Open2] Unknown BMD version: %d\n in %.64s\n", static_cast<int>(Version), ModelPath);
         m_bCompletedAlloc = false;
         return false;
     }
-
-
-    unsigned char* data = decryptedData ? decryptedData.get() : fileData.get();
+    else if (containerStatus == Render::Models::BmdContainerStatus::BadHeader)
+    {
+        wprintf(L"[Open2] ERROR: Invalid file header (expected 'BMD') in file %.64s\n", ModelPath);
+        m_bCompletedAlloc = false;
+        return false;
+    }
+    else
+    {
+        wprintf(L"[Open2] ERROR: Invalid BMD payload in %.64s\n", ModelPath);
+        m_bCompletedAlloc = false;
+        return false;
+    }
 
     memcpy(Name, data + ptr, 32); ptr += 32;
 
