@@ -15,6 +15,8 @@
 #include "UI/NewUI/NewUISystem.h"
 #include "GameLogic/Skills/SkillManager.h"
 #include "GameLogic/Items/CSItemOption.h"
+#include "GameLogic/Items/ItemSetTypeScript.h"
+#include "Core/Utilities/Log/MuLogger.h"
 #include "I18N/All.h"
 
 #include <algorithm>
@@ -91,35 +93,53 @@ bool CSItemOption::OpenItemSetType(const wchar_t* filename)
         return false;
     }
 
-    const std::size_t entrySize = sizeof(ITEM_SET_TYPE);
-    std::vector<std::uint8_t> buffer(entrySize * MAX_ITEM);
-    if (std::fread(buffer.data(), buffer.size(), 1, file.get()) != 1)
+    if (std::fseek(file.get(), 0, SEEK_END) != 0)
     {
-        ReportFileIssue(filename, L"Failed to read content.");
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - could not read file size", mu_wchar_to_utf8(filename));
+        return false;
+    }
+    const long fileSize = std::ftell(file.get());
+    if (fileSize < 0 || std::fseek(file.get(), 0, SEEK_SET) != 0)
+    {
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - could not read file size", mu_wchar_to_utf8(filename));
         return false;
     }
 
-    std::uint32_t checksum{};
-    if (std::fread(&checksum, sizeof(checksum), 1, file.get()) != 1)
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
+    if (fileSize > 0 && std::fread(bytes.data(), 1, bytes.size(), file.get()) != bytes.size())
     {
-        ReportFileIssue(filename, L"Failed to read checksum.");
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - failed to read content", mu_wchar_to_utf8(filename));
         return false;
     }
 
-    if (checksum != GenerateCheckSum2(buffer.data(), static_cast<int>(buffer.size()), 0xE5F1))
+    static_assert(MAX_ITEM == GameLogic::Items::kSeason6ItemCount);
+
+    const GameLogic::Items::ItemSetTypeDocument document =
+        GameLogic::Items::ParseItemSetType(bytes.data(), bytes.size());
+    if (!document.ok)
     {
-        ReportFileIssue(filename, L"File corrupted.");
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(filename), document.error);
         return false;
     }
 
-    auto* pSeek = buffer.data();
     for (int i = 0; i < MAX_ITEM; ++i)
     {
-        BuxConvert(pSeek, static_cast<int>(entrySize));
-        std::memcpy(&m_ItemSetType[i], pSeek, entrySize);
-        pSeek += entrySize;
+        m_ItemSetType[i] = {};
     }
 
+    const int count = static_cast<int>(document.records.size()) < MAX_ITEM ? static_cast<int>(document.records.size())
+                                                                           : MAX_ITEM;
+    for (int i = 0; i < count; ++i)
+    {
+        const GameLogic::Items::ItemSetTypeRecord& record = document.records[static_cast<std::size_t>(i)];
+        m_ItemSetType[i].byOption[0] = record.option[0];
+        m_ItemSetType[i].byOption[1] = record.option[1];
+        m_ItemSetType[i].byMixItemLevel[0] = record.mixLevel[0];
+        m_ItemSetType[i].byMixItemLevel[1] = record.mixLevel[1];
+    }
+
+    MU_LOG_INFO(mu::log::Get("data"), "Loaded {} item set rows from {} ({}-byte records)", document.records.size(),
+                mu_wchar_to_utf8(filename), document.recordBytes);
     return true;
 }
 

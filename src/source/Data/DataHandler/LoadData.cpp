@@ -12,6 +12,7 @@
 #include "Data/GameData/ItemData/ItemTextureFiles.h"
 
 #include <string>
+#include <vector>
 
 CLoadData gLoadData;
 
@@ -107,30 +108,90 @@ std::wstring GetTexturePath(const std::wstring& subFolder, const std::wstring& t
     return TextureRootFolder + subFolder + textureFileName;
 }
 
-// Loads the texture from the first folder that has it. Only .tga and .jpg
-// files are loaded; for other files `current` is kept.
-GLuint LoadTextureFromFolders(const std::wstring& textureFileName, std::span<const std::wstring> subFolders, int wrap,
-                              int filter, GLuint current)
+std::wstring TextureFileNameOnly(const std::wstring& path)
 {
-    wchar_t extension[_MAX_EXT] = {0};
-    _wsplitpath(textureFileName.c_str(), NULL, NULL, NULL, extension);
-    const wchar_t type = static_cast<wchar_t>(towlower(extension[1]));
-    if (type != L't' && type != L'j')
+    const std::size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos)
     {
-        return current;
+        return path;
     }
+    return path.substr(slash + 1);
+}
 
-    for (const std::wstring& subFolder : subFolders)
+std::wstring TextureFromModelPath(std::wstring path)
+{
+    for (wchar_t& character : path)
     {
-        // TGA textures are always sharp; the filter applies to JPG textures.
-        const GLuint index =
-            Bitmaps.LoadImage(GetTexturePath(subFolder, textureFileName), type == L't' ? GL_NEAREST : filter, wrap);
+        if (character == L'/')
+        {
+            character = L'\\';
+        }
+    }
+    if (path.rfind(L"Data\\", 0) == 0 || path.rfind(L"data\\", 0) == 0)
+    {
+        return path;
+    }
+    return std::wstring(TextureRootFolder) + path;
+}
+
+bool IsJpegExtension(const wchar_t* extension)
+{
+    return _wcsicmp(extension, L".jpg") == 0 || _wcsicmp(extension, L".ozj") == 0;
+}
+
+bool IsTgaExtension(const wchar_t* extension)
+{
+    return _wcsicmp(extension, L".tga") == 0 || _wcsicmp(extension, L".ozt") == 0;
+}
+
+GLuint LoadFirstTexture(const std::vector<std::wstring>& paths, int wrap, int filter)
+{
+    for (const std::wstring& path : paths)
+    {
+        wchar_t extension[_MAX_EXT] = {0};
+        _wsplitpath(path.c_str(), nullptr, nullptr, nullptr, extension);
+        if (!IsJpegExtension(extension) && !IsTgaExtension(extension))
+        {
+            continue;
+        }
+        const GLuint index = Bitmaps.LoadImage(path, IsTgaExtension(extension) ? GL_NEAREST : filter, wrap);
         if (index != BITMAP_UNKNOWN)
         {
             return index;
         }
     }
     return BITMAP_UNKNOWN;
+}
+
+// Loads the texture from the first folder that has it. JPEG and TGA names,
+// including the .ozj and .ozt containers, are loaded. Other files keep `current`.
+GLuint LoadTextureFromFolders(const std::wstring& textureFileName, std::span<const std::wstring> subFolders, int wrap,
+                              int filter, GLuint current)
+{
+    wchar_t extension[_MAX_EXT] = {0};
+    _wsplitpath(textureFileName.c_str(), NULL, NULL, NULL, extension);
+    if (!IsJpegExtension(extension) && !IsTgaExtension(extension))
+    {
+        return current;
+    }
+
+    std::vector<std::wstring> paths;
+    const std::wstring fileName = TextureFileNameOnly(textureFileName);
+    const bool hasDirectory = fileName != textureFileName;
+    for (const std::wstring& subFolder : subFolders)
+    {
+        paths.push_back(GetTexturePath(subFolder, textureFileName));
+        if (hasDirectory)
+        {
+            paths.push_back(GetTexturePath(subFolder, fileName));
+        }
+    }
+    if (hasDirectory)
+    {
+        paths.push_back(TextureFromModelPath(textureFileName));
+    }
+
+    return LoadFirstTexture(paths, wrap, filter);
 }
 
 void MarkSkinAndHair(const char* fileName, const std::wstring& textureFileName, GLuint textureIndex)

@@ -1,4 +1,6 @@
 ﻿#include "stdafx.h"
+#include "UI/NewUI/HUD/MasterSkillTreeScript.h"
+#include "Core/Utilities/Log/MuLogger.h"
 #include "App/Platform/Windows/Winmain.h"
 #include "Render/Textures/ZzzTexture.h"
 #include "GameLogic/Items/CSItemOption.h"
@@ -13,7 +15,8 @@
 
 namespace 
 {
-    _MASTER_SKILLTREE_DATA m_stMasterSkillTreeData[MAX_MASTER_SKILL_DATA];
+    static_assert(sizeof(_MASTER_SKILLTREE_DATA) == UI::MasterSkill::kMasterSkillRecordBytes);
+    _MASTER_SKILLTREE_DATA m_stMasterSkillTreeData[MAX_MASTER_SKILL_TREE_DATA];
     _MASTER_SKILL_TOOLTIP m_stMasterSkillTooltip[MAX_MASTER_SKILL_DATA];
 }
 
@@ -100,11 +103,9 @@ void SEASON3B::CNewUIMasterLevel::OpenMasterSkillTreeData(const wchar_t* path)
     memset(m_stMasterSkillTreeData, 0, sizeof(m_stMasterSkillTreeData));
 
     FILE* fp = _wfopen(path, L"rb");
-
-    wchar_t Text[256];
-
     if (fp == nullptr)
     {
+        wchar_t Text[256];
         mu_swprintf(Text, L"%ls - File not exist.", path);
         g_ErrorReport.Write(Text);
         MessageBox(g_hWnd, Text, nullptr, MB_OK);
@@ -112,44 +113,56 @@ void SEASON3B::CNewUIMasterLevel::OpenMasterSkillTreeData(const wchar_t* path)
         return;
     }
 
-    constexpr int Size = sizeof(_MASTER_SKILLTREE_DATA);
-
-    auto Buffer = new BYTE[Size * MAX_MASTER_SKILL_DATA];
-
-    fread(Buffer, Size * MAX_MASTER_SKILL_DATA, 1, fp);
-
-    DWORD dwCheckSum;
-
-    fread(&dwCheckSum, sizeof(DWORD), 1u, fp);
-
-    fclose(fp);
-
-    if (dwCheckSum != GenerateCheckSum2(Buffer, 12288, 0x2BC1))
+    if (std::fseek(fp, 0, SEEK_END) != 0)
     {
-        mu_swprintf(Text, L"%ls - File corrupted.", path);
-        g_ErrorReport.Write(Text);
-        MessageBox(g_hWnd, Text, nullptr, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
+        std::fclose(fp);
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - could not read file size", mu_wchar_to_utf8(path));
+        return;
+    }
+    const long fileSize = std::ftell(fp);
+    if (fileSize < 0 || std::fseek(fp, 0, SEEK_SET) != 0)
+    {
+        std::fclose(fp);
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - could not read file size", mu_wchar_to_utf8(path));
         return;
     }
 
-    BYTE* pSeek = Buffer;
-
-    for (int i = 0; i < MAX_MASTER_SKILL_DATA; i++)
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
+    if (fileSize > 0 && std::fread(bytes.data(), 1, bytes.size(), fp) != bytes.size())
     {
-        BuxConvert(pSeek, Size);
+        std::fclose(fp);
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - failed to read content", mu_wchar_to_utf8(path));
+        return;
+    }
+    std::fclose(fp);
 
-        memcpy(&m_stMasterSkillTreeData[i], pSeek, Size);
-
-        pSeek += Size;
-
-        if (pSeek == nullptr)
-        {
-            break;
-        }
+    const UI::MasterSkill::MasterSkillDocument document = UI::MasterSkill::ParseMasterSkillTree(bytes.data(), bytes.size());
+    if (!document.ok)
+    {
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(path), document.error);
+        return;
     }
 
-    delete[] Buffer;
+    const int capacity = MAX_MASTER_SKILL_TREE_DATA;
+    const int count = static_cast<int>(document.records.size()) < capacity ? static_cast<int>(document.records.size())
+                                                                           : capacity;
+    for (int i = 0; i < count; ++i)
+    {
+        const UI::MasterSkill::MasterSkillRecord& record = document.records[static_cast<std::size_t>(i)];
+        _MASTER_SKILLTREE_DATA& skill = m_stMasterSkillTreeData[i];
+        skill.Index = record.index;
+        skill.ClassCode = static_cast<MASTER_SKILL_TREE_CLASS>(record.classCode);
+        skill.Group = record.group;
+        skill.RequiredPoints = record.requiredPoints;
+        skill.MaxLevel = record.maxLevel;
+        skill.ArrowDirection = record.arrowDirection;
+        skill.RequireSkill[0] = static_cast<ActionSkillType>(record.requireSkill[0]);
+        skill.RequireSkill[1] = static_cast<ActionSkillType>(record.requireSkill[1]);
+        skill.Skill = static_cast<ActionSkillType>(record.skill);
+        skill.DefValue = record.defValue;
+    }
+
+    MU_LOG_INFO(mu::log::Get("data"), "Loaded {} master skills from {}", document.records.size(), mu_wchar_to_utf8(path));
 }
 
 void SEASON3B::CNewUIMasterLevel::OpenMasterSkillTooltip(const wchar_t* path)
@@ -301,11 +314,11 @@ void SEASON3B::CNewUIMasterLevel::SetMasterSkillTreeData()
 {
     this->ClearSkillTreeData();
 
-    for (int i = 0; i < MAX_MASTER_SKILL_DATA; i++)
+    for (int i = 0; i < MAX_MASTER_SKILL_TREE_DATA; i++)
     {
         if (m_stMasterSkillTreeData[i].Index == 0)
         {
-            break;
+            continue;
         }
 
         if ((this->classCode & m_stMasterSkillTreeData[i].ClassCode) == 0)
@@ -313,10 +326,8 @@ void SEASON3B::CNewUIMasterLevel::SetMasterSkillTreeData()
             continue;
         }
 
-        if (!this->map_masterData.insert(std::pair<BYTE, _MASTER_SKILLTREE_DATA>(m_stMasterSkillTreeData[i].Index, m_stMasterSkillTreeData[i])).second)
-        {
-            break;
-        }
+        this->map_masterData.insert(std::pair<WORD, _MASTER_SKILLTREE_DATA>(m_stMasterSkillTreeData[i].Index,
+                                                                            m_stMasterSkillTreeData[i]));
     }
 }
 

@@ -3,6 +3,7 @@
 #include "ItemModelLoader.h"
 #include "ItemModelProblem.h"
 
+#include "Core/Globals/_TextureIndex.h"
 #include "Core/Globals/_enum.h"
 #include "Core/Text/Utf8.h"
 #include "Core/Utilities/Log/MuLogger.h"
@@ -11,7 +12,13 @@
 #include "Data/GameData/ItemData/ItemModelDatabase.h"
 #include "Data/GameData/ItemData/ItemModelGlowJson.h"
 #include "Data/GameData/ItemData/ItemModelSlots.h"
+#include "Data/GameData/ItemData/ItemTextureFiles.h"
+#include "Data/GameData/ItemData/ItemType.h"
+#include "Data/GameData/ItemData/LocalItemTable.h"
 #include "Render/Models/ZzzBMD.h"
+#include "Render/Sprites/GlobalBitmap.h"
+
+#include <cctype>
 
 #include <algorithm>
 #include <map>
@@ -34,6 +41,9 @@ constexpr const char* LoggerName = "data";
 
 // The problems of OpenModels and OpenTextures, until TakeProblemMessage.
 std::vector<ItemModelProblem> g_problems;
+
+bool MeshLacksTexture(GLuint index);
+void AssignJewelStemIcon(int itemType, const ItemModelDefinition& model);
 
 std::wstring ToLoaderPath(const std::string& path)
 {
@@ -133,21 +143,36 @@ void CheckModel(int itemType, const ItemModelDefinition& model, const LookNames&
 }
 
 // Whether the file was opened.
-bool OpenModel(int itemType, const ItemModelDefinition& model, const LookNames& lookNames)
+bool OpenModelFile(int itemType, const ItemModelDefinition& model, const LookNames& lookNames, const std::string& file)
 {
-    const std::wstring path = ToLoaderPath(model.file);
+    const std::wstring path = ToLoaderPath(file);
     const size_t nameStart = path.find_last_of(LoaderSeparator) + 1; // 0 when there is no folder
     const std::wstring folder = path.substr(0, nameStart);
     const std::wstring name = path.substr(nameStart, path.size() - nameStart - ModelFileExtension.size());
 
     if (!gLoadData.AccessModel(ToModelSlot(itemType), folder.c_str(), name.c_str()))
     {
-        AddProblem(MakeProblem(ItemModelProblemType::ModelFileMissing, model));
         return false;
     }
     MarkNoneBlendMeshes(itemType, model);
     CheckModel(itemType, model, lookNames);
     return true;
+}
+
+bool OpenModel(int itemType, const ItemModelDefinition& model, const LookNames& lookNames)
+{
+    if (OpenModelFile(itemType, model, lookNames, model.file))
+    {
+        return true;
+    }
+    const LocalItemRow* local = FindLocalItemModel(itemType);
+    if (local != nullptr && !local->modelFile.empty() && local->modelFile != model.file &&
+        OpenModelFile(itemType, model, lookNames, local->modelFile))
+    {
+        return true;
+    }
+    AddProblem(MakeProblem(ItemModelProblemType::ModelFileMissing, model));
+    return false;
 }
 
 // The item type whose slot opened the file of a shared model.
@@ -206,10 +231,72 @@ void OpenModelTextures(int itemType, const ItemModelDefinition& model)
     }
 
     std::vector<TextureProblem> textureProblems;
-    gLoadData.OpenTexture(ToModelSlot(itemType), folders, textureProblems);
+    const int slot = ToModelSlot(itemType);
+    gLoadData.OpenTexture(slot, folders, textureProblems);
+    AssignJewelStemIcon(itemType, model);
+    const BMD& opened = Models[slot];
     for (const TextureProblem& textureProblem : textureProblems)
     {
+        if (opened.IndexTexture != nullptr && textureProblem.mesh >= 0 && textureProblem.mesh < opened.NumMeshs &&
+            !MeshLacksTexture(opened.IndexTexture[textureProblem.mesh]))
+        {
+            continue;
+        }
         AddTextureProblem(model, textureProblem);
+    }
+}
+
+bool MeshLacksTexture(GLuint index)
+{
+    return index == 0 || index == static_cast<GLuint>(BITMAP_UNKNOWN);
+}
+
+bool IsJewelModelFile(std::string_view modelFile)
+{
+    const std::size_t slash = modelFile.find_last_of("/\\");
+    std::string name(modelFile.substr(slash == std::string_view::npos ? 0 : slash + 1));
+    for (char& character : name)
+    {
+        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    }
+    return name.rfind("jewel", 0) == 0 || name == "suho.bmd" || name == "jos.bmd";
+}
+
+// Season 21 jewel meshes name a container the loader used to skip, so the
+// slot stays blank. The icon is the model stem: Jewel01.bmd -> Jewel01.OZJ.
+// Shared jewel models are opened by an earlier item group, so the file name
+// is checked as well as the potion section.
+void AssignJewelStemIcon(int itemType, const ItemModelDefinition& model)
+{
+    if (GetItemGroup(itemType) != ITEM_GROUP_POTION && !IsJewelModelFile(model.file))
+    {
+        return;
+    }
+    BMD& bmd = Models[ToModelSlot(itemType)];
+    if (bmd.NumMeshs <= 0 || bmd.IndexTexture == nullptr || bmd.SharesData())
+    {
+        return;
+    }
+    for (int mesh = 0; mesh < bmd.NumMeshs; ++mesh)
+    {
+        if (!MeshLacksTexture(bmd.IndexTexture[mesh]))
+        {
+            return;
+        }
+    }
+    const std::optional<std::string> stored = ModelStemOzjPath(model.file);
+    if (!stored.has_value())
+    {
+        return;
+    }
+    const GLuint loaded = Bitmaps.LoadImage(ToLoaderPath(*stored));
+    if (loaded == static_cast<GLuint>(BITMAP_UNKNOWN))
+    {
+        return;
+    }
+    for (int mesh = 0; mesh < bmd.NumMeshs; ++mesh)
+    {
+        bmd.IndexTexture[mesh] = loaded;
     }
 }
 
@@ -225,6 +312,95 @@ template <typename TOpen> void ForEachModel(TOpen&& open)
         }
     }
 }
+
+std::wstring TextureFolderOfModel(const std::string& modelFile)
+{
+    std::string path = modelFile;
+    std::replace(path.begin(), path.end(), '\\', '/');
+    if (path.rfind("Data/", 0) == 0 || path.rfind("data/", 0) == 0)
+    {
+        path.erase(0, 5);
+    }
+    const std::size_t slash = path.rfind('/');
+    if (slash == std::string::npos)
+    {
+        return L"Item\\";
+    }
+    path.resize(slash + 1);
+    std::wstring folder = ToLoaderPath(path);
+    if (folder.empty() || folder.back() != LoaderSeparator)
+    {
+        folder += LoaderSeparator;
+    }
+    return folder;
+}
+
+void OpenLocalItemFile(const LocalItemRow& item, std::map<std::string, int, std::less<>>& openedByPath)
+{
+    if (!IsValidItemType(item.itemType) || item.modelFile.empty() || g_ItemDatabase.Find(item.itemType) != nullptr ||
+        g_ItemModelDatabase.Find(item.itemType) != nullptr)
+    {
+        return;
+    }
+    const int slot = ToModelSlot(item.itemType);
+    if (Models[slot].NumMeshs > 0)
+    {
+        return;
+    }
+    const auto [opened, isFirst] = openedByPath.try_emplace(item.modelFile, NotOpened);
+    if (!isFirst)
+    {
+        if (opened->second != NotOpened)
+        {
+            gLoadData.ShareModel(slot, opened->second);
+        }
+        return;
+    }
+    const std::wstring path = ToLoaderPath(item.modelFile);
+    const std::size_t nameStart = path.find_last_of(LoaderSeparator) + 1;
+    if (path.size() < nameStart + ModelFileExtension.size())
+    {
+        return;
+    }
+    const std::wstring folder = path.substr(0, nameStart);
+    const std::wstring name = path.substr(nameStart, path.size() - nameStart - ModelFileExtension.size());
+    if (!gLoadData.AccessModel(slot, folder.c_str(), name.c_str()))
+    {
+        return;
+    }
+    opened->second = slot;
+}
+
+void OpenLocalItemTextures()
+{
+    std::map<std::string, int, std::less<>> textured;
+    for (const LocalItemRow& item : StoredLocalItems())
+    {
+        if (!IsValidItemType(item.itemType) || g_ItemDatabase.Find(item.itemType) != nullptr ||
+            g_ItemModelDatabase.Find(item.itemType) != nullptr)
+        {
+            continue;
+        }
+        const int slot = ToModelSlot(item.itemType);
+        if (Models[slot].NumMeshs <= 0 || Models[slot].SharesData())
+        {
+            continue;
+        }
+        if (!textured.try_emplace(item.modelFile, slot).second)
+        {
+            continue;
+        }
+        std::vector<std::wstring> folders;
+        const std::wstring folder = TextureFolderOfModel(item.modelFile);
+        folders.push_back(folder);
+        if (folder != L"Item\\")
+        {
+            folders.push_back(L"Item\\");
+        }
+        gLoadData.OpenTexture(slot, folders);
+    }
+}
+
 } // namespace
 
 void OpenModels(const LookNames& lookNames)
@@ -242,6 +418,11 @@ void OpenModels(const LookNames& lookNames)
                 OpenSharedModel(itemType, model, lookNames, sharedModelsOpenedBy);
             }
         });
+    std::map<std::string, int, std::less<>> localModelsOpenedBy;
+    for (const LocalItemRow& item : StoredLocalItems())
+    {
+        OpenLocalItemFile(item, localModelsOpenedBy);
+    }
 }
 
 void OpenTextures()
@@ -255,6 +436,7 @@ void OpenTextures()
                 OpenModelTextures(itemType, model);
             }
         });
+    OpenLocalItemTextures();
 }
 
 std::string TakeProblemMessage()

@@ -16,7 +16,8 @@ struct StoredTextureExtension
     std::string_view storedExtension;
 };
 
-constexpr std::array<StoredTextureExtension, 2> StoredTextureExtensions = {{{".jpg", ".OZJ"}, {".tga", ".OZT"}}};
+constexpr std::array<StoredTextureExtension, 4> StoredTextureExtensions = {
+    {{".jpg", ".OZJ"}, {".ozj", ".OZJ"}, {".tga", ".OZT"}, {".ozt", ".OZT"}}};
 constexpr std::string_view HiddenTexturePrefix = "hid";
 } // namespace
 
@@ -55,5 +56,18 @@ std::optional<std::string> GetStoredTextureFileName(std::string_view textureFile
         }
     }
     return std::nullopt;
+}
+
+std::optional<std::string> ModelStemOzjPath(std::string_view modelFile)
+{
+    const size_t slash = modelFile.find_last_of("/\\");
+    const size_t nameStart = slash == std::string_view::npos ? 0 : slash + 1;
+    const std::string_view name = modelFile.substr(nameStart);
+    constexpr std::string_view kModelExtension = ".bmd";
+    if (!EndsWithIgnoringCase(name, kModelExtension) || name.size() <= kModelExtension.size())
+    {
+        return std::nullopt;
+    }
+    return std::string(modelFile.substr(0, modelFile.size() - kModelExtension.size())) + ".OZJ";
 }
 } // namespace Data::Items

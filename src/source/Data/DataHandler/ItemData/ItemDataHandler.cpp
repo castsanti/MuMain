@@ -10,11 +10,15 @@
 #include "Data/GameData/ItemData/ItemDataValidation.h"
 #include "Data/GameData/ItemData/ItemDatabase.h"
 #include "Data/GameData/ItemData/ItemModelDatabase.h"
+#include "Data/GameData/ItemData/LocalItemTable.h"
 #include "Engine/Object/ZzzInfomation.h"
 #include "I18N/All.h"
 
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
 #include <memory>
+#include <vector>
 
 #ifdef _EDITOR
 #include "Data/DataHandler/CommonDataSaver.h"
@@ -27,6 +31,8 @@
 extern ITEM_ATTRIBUTE* ItemAttribute;
 
 using namespace Data::Items;
+
+void ApplySeason21ItemTable();
 
 namespace
 {
@@ -143,6 +149,7 @@ bool CItemDataHandler::Load(std::string& errorMessage)
     g_ItemDatabase.SetDisplayLocale(I18N::GetCurrentLocale());
     g_ItemDatabase.Build(result.items);
     FillItemAttributes();
+    ApplySeason21ItemTable();
     RegisterLocaleObserver();
 
     MU_LOG_INFO(mu::log::Get("data"), "Loaded {} items from {} in {:.1f} ms (item database build {:.2f} ms)",
@@ -173,6 +180,72 @@ bool CItemDataHandler::LoadModels(std::string& errorMessage)
     MU_LOG_INFO(mu::log::Get("data"), "Loaded {} item models from {} in {:.1f} ms", g_ItemModelDatabase.GetModelCount(),
                 GetItemModelDataDirectory().string(), MillisecondsSince(loadStart));
     return true;
+}
+
+static bool ReadWholeFile(const wchar_t* path, std::vector<std::uint8_t>& bytes)
+{
+    FILE* file = _wfopen(path, L"rb");
+    if (file == nullptr)
+    {
+        return false;
+    }
+    if (std::fseek(file, 0, SEEK_END) != 0)
+    {
+        std::fclose(file);
+        return false;
+    }
+    const long fileSize = std::ftell(file);
+    if (fileSize <= 0 || std::fseek(file, 0, SEEK_SET) != 0)
+    {
+        std::fclose(file);
+        return false;
+    }
+    bytes.resize(static_cast<std::size_t>(fileSize));
+    const std::size_t read = std::fread(bytes.data(), 1, bytes.size(), file);
+    std::fclose(file);
+    return read == bytes.size();
+}
+
+void ApplySeason21ItemTable()
+{
+    if (ItemAttribute == nullptr)
+    {
+        return;
+    }
+
+    std::vector<std::uint8_t> bytes;
+    if (!ReadWholeFile(L"Data\\Local\\Item.bmd", bytes))
+    {
+        return;
+    }
+
+    LocalItemDocument document = ParseLocalItemTable(bytes.data(), bytes.size());
+    if (!document.error.empty())
+    {
+        MU_LOG_WARN(mu::log::Get("data"), "Data/Local/Item.bmd was not used: {}", document.error);
+        return;
+    }
+
+    int sized = 0;
+    for (const LocalItemRow& item : document.items)
+    {
+        if (!IsValidItemType(item.itemType) || item.width <= 0 || item.height <= 0)
+        {
+            continue;
+        }
+        // Defined items keep the Season 6 numbers the server sends.
+        if (g_ItemDatabase.Find(item.itemType) != nullptr)
+        {
+            continue;
+        }
+        ItemAttribute[item.itemType].Width = static_cast<BYTE>(item.width);
+        ItemAttribute[item.itemType].Height = static_cast<BYTE>(item.height);
+        ++sized;
+    }
+    const int rows = static_cast<int>(document.items.size());
+    SetLocalItemModels(std::move(document.items));
+    MU_LOG_INFO(mu::log::Get("data"), "Loaded {} Season 21 items from Data/Local/Item.bmd ({} with a size)", rows,
+                sized);
 }
 
 void CItemDataHandler::FillItemAttributes()
@@ -207,6 +280,23 @@ void CItemDataHandler::OnLocaleChanged(void* context) noexcept
     auto* handler = static_cast<CItemDataHandler*>(context);
     g_ItemDatabase.SetDisplayLocale(I18N::GetCurrentLocale());
     handler->FillItemAttributes();
+    if (ItemAttribute == nullptr)
+    {
+        return;
+    }
+    for (const LocalItemRow& item : StoredLocalItems())
+    {
+        if (!IsValidItemType(item.itemType) || item.width <= 0 || item.height <= 0)
+        {
+            continue;
+        }
+        if (g_ItemDatabase.Find(item.itemType) != nullptr)
+        {
+            continue;
+        }
+        ItemAttribute[item.itemType].Width = static_cast<BYTE>(item.width);
+        ItemAttribute[item.itemType].Height = static_cast<BYTE>(item.height);
+    }
 }
 
 #ifdef _EDITOR

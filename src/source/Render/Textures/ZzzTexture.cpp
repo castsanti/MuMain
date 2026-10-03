@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include "ZzzTexture.h"
+#include "Render/Textures/OzjJpeg.h"
 
 #include "Network/Server/WSclient.h"
 #include "turbojpeg.h"
@@ -192,17 +193,22 @@ bool OpenJpegBuffer(wchar_t* filename, float* BufferFloat)
 
     fseek(compressedFile, 0, SEEK_END);
     const auto fileSize = ftell(compressedFile);
-    if (fileSize < 24)
+    if (fileSize <= 0)
     {
         fclose(compressedFile);
         return false;
     }
 
-    fseek(compressedFile, 24, SEEK_SET);
-    const auto jpegSize = fileSize - 24;
-    std::vector<unsigned char> jpegBuf(static_cast<size_t>(jpegSize));
-    fread(jpegBuf.data(), 1, jpegBuf.size(), compressedFile);
+    fseek(compressedFile, 0, SEEK_SET);
+    std::vector<unsigned char> fileBytes(static_cast<size_t>(fileSize));
+    fread(fileBytes.data(), 1, fileBytes.size(), compressedFile);
     fclose(compressedFile);
+
+    std::vector<std::uint8_t> jpegBuf;
+    if (!Render::Textures::ReadOzjJpeg(fileBytes.data(), fileBytes.size(), jpegBuf))
+    {
+        return false;
+    }
 
     int jpegWidth = 0;
     int jpegHeight = 0;

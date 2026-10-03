@@ -17,6 +17,11 @@ bool IsHiddenTexture(std::string_view textureFileName);
 
 // The game loads .jpg and .tga textures from encrypted copies with the same
 // name: "Sword01.jpg" is read from "Sword01.OZJ", "hair.tga" from
-// "hair.OZT". Returns that file name, or nothing for other file types.
+// "hair.OZT". A mesh that already names the container ("Jewel01.ozj") uses
+// that container. Returns that file name, or nothing for other file types.
 std::optional<std::string> GetStoredTextureFileName(std::string_view textureFileName);
+
+// "Data/Item/Jewel01.bmd" -> "Data/Item/Jewel01.OZJ". The inventory icon of a
+// jewel whose mesh names no loadable texture.
+std::optional<std::string> ModelStemOzjPath(std::string_view modelFile);
 } // namespace Data::Items

@@ -1173,6 +1173,29 @@ void CMapManager::Load() // OK
     }
 }
 
+namespace
+{
+
+constexpr int kTerrainMismatchTextCapacity = 256;
+
+bool RejectTerrainWorldMismatch(const wchar_t* fileName, int mapNumber, int clientWorld)
+{
+    if (mapNumber == -1 || mapNumber == clientWorld)
+    {
+        return false;
+    }
+
+    wchar_t text[kTerrainMismatchTextCapacity];
+    mu_swprintf(text, L"%ls file map number %d does not match world %d.", fileName, mapNumber, clientWorld);
+    g_ErrorReport.Write(text);
+    g_ErrorReport.Write(L"\r\n");
+    MessageBox(g_hWnd, text, NULL, MB_OK);
+    SendMessage(g_hWnd, WM_DESTROY, 0, 0);
+    return true;
+}
+
+} // namespace
+
 void CMapManager::LoadWorld(int Map)
 {
     if (Map == 32 && this->WorldActive == 32)
@@ -1226,16 +1249,9 @@ void CMapManager::LoadWorld(int Map)
     mu_swprintf(WorldName, L"World%d", iMapWorld);
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.map", WorldName, iMapWorld);
 
-    int iResult = OpenTerrainMapping(FileName);
-
-    if (iMapWorld != iResult && -1 != iResult)
+    int iResult = OpenTerrainMapping(FileName, iMapWorld);
+    if (RejectTerrainWorldMismatch(FileName, iResult, iMapWorld))
     {
-        wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file corrupted.", FileName);
-        g_ErrorReport.Write(Text);
-        g_ErrorReport.Write(L"\r\n");
-        MessageBox(g_hWnd, Text, NULL, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
         return;
     }
 
@@ -1290,29 +1306,17 @@ void CMapManager::LoadWorld(int Map)
         {
             mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.att", WorldName, iMapWorld);
         }
-    iResult = OpenTerrainAttribute(FileName);
-    if (iMapWorld != iResult && -1 != iResult)
+    iResult = OpenTerrainAttribute(FileName, iMapWorld);
+    if (RejectTerrainWorldMismatch(FileName, iResult, iMapWorld))
     {
-        wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file corrupted.", FileName);
-        g_ErrorReport.Write(Text);
-        g_ErrorReport.Write(L"\r\n");
-        MessageBox(g_hWnd, Text, NULL, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
         return;
     }
 
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.obj", WorldName, iMapWorld);
 
-    iResult = OpenObjectsEnc(FileName);
-    if (iMapWorld != iResult && -1 != iResult)
+    iResult = OpenObjectsEnc(FileName, iMapWorld);
+    if (RejectTerrainWorldMismatch(FileName, iResult, iMapWorld))
     {
-        wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file corrupted.", FileName);
-        g_ErrorReport.Write(Text);
-        g_ErrorReport.Write(L"\r\n");
-        MessageBox(g_hWnd, Text, NULL, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
         return;
     }
 

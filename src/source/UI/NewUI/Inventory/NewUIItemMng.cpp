@@ -7,6 +7,8 @@
 #include "GameLogic/Items/CSItemOption.h"
 #include "GameLogic/Pets/GIPetManager.h"
 #include "Engine/Object/ZzzInfomation.h"
+#include "Data/GameData/ItemData/ItemType.h"
+#include "Data/GameData/ItemData/LocalItemTable.h"
 #include "Network/Server/SocketSystem.h"
 
 using namespace SEASON3B;
@@ -154,7 +156,7 @@ ITEM* SEASON3B::CNewUIItemMng::CreateItemByParameters(const ItemCreationParams* 
     pNewItem->bExpiredPeriod = parameters->IsExpired;
     // pNewItem->lExpireTime is received by another packet? should we integrate that?
     pNewItem->Key = GenerateItemKey();
-    pNewItem->Type = parameters->Group * MAX_ITEM_INDEX + parameters->Number;
+    pNewItem->Type = Data::Items::ChooseEquipmentItemType(parameters->Group, parameters->Number);
     pNewItem->Level = parameters->Level;
     pNewItem->Durability = parameters->Durability;
     pNewItem->HasLuck = parameters->WithLuck;

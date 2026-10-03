@@ -6,6 +6,13 @@ mu_add_test(
 )
 
 mu_add_test(
+    NAME test_server_list_script
+    SOURCES
+        test_server_list_script.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Network/Server/ServerListScript.cpp
+)
+
+mu_add_test(
     NAME test_byte_order
     SOURCES
         test_byte_order.cpp

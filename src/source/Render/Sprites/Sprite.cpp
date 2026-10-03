@@ -51,7 +51,15 @@ void CSprite::Create(int nOrgWidth, int nOrgHeight, int nTexID, int nMaxFrame, S
 
     m_nNowFrame = -1;
 
-    if (-1 < m_nTexID)
+    if (m_nTexID < 0 || m_pTexture == nullptr)
+    {
+        ::memset(m_aTexCoord, 0, sizeof(STexCoord) * POS_MAX);
+
+        m_nMaxFrame = 0;
+        m_nStartFrame = m_nEndFrame = -1;
+        m_bTile = false;
+    }
+    else
     {
         m_aTexCoord[LT].fTU = 0.5f / m_pTexture->Width;
         m_aTexCoord[LT].fTV = 0.5f / m_pTexture->Height;
@@ -86,14 +94,6 @@ void CSprite::Create(int nOrgWidth, int nOrgHeight, int nTexID, int nMaxFrame, S
             m_nStartFrame = m_nEndFrame = -1;
             m_bTile = bTile;
         }
-    }
-    else
-    {
-        ::memset(m_aTexCoord, 0, sizeof(STexCoord) * POS_MAX);
-
-        m_nMaxFrame = 0;
-        m_nStartFrame = m_nEndFrame = -1;
-        m_bTile = false;
     }
 
     m_byAlpha = m_byRed = m_byGreen = m_byBlue = 255;
@@ -166,13 +166,13 @@ void CSprite::SetSize(int nWidth, int nHeight, CHANGE_PRAM eChangedPram)
         if (IS_SIZING_DATUMS_R(m_nSizingDatums))
         {
             m_aScrCoord[LT].fX = m_aScrCoord[LB].fX = m_aScrCoord[RT].fX - (float)nWidth;
-            if (m_bTile)
+            if (m_bTile && m_pTexture != nullptr)
                 m_aTexCoord[LT].fTU = m_aTexCoord[LB].fTU = m_aTexCoord[RT].fTU - nWidth / m_pTexture->Width;
         }
         else
         {
             m_aScrCoord[RT].fX = m_aScrCoord[RB].fX = m_aScrCoord[LT].fX + (float)nWidth;
-            if (m_bTile)
+            if (m_bTile && m_pTexture != nullptr)
                 m_aTexCoord[RT].fTU = m_aTexCoord[RB].fTU = nWidth / m_pTexture->Width;
         }
     }
@@ -181,13 +181,13 @@ void CSprite::SetSize(int nWidth, int nHeight, CHANGE_PRAM eChangedPram)
         if (IS_SIZING_DATUMS_B(m_nSizingDatums))
         {
             m_aScrCoord[LT].fY = m_aScrCoord[RT].fY = m_aScrCoord[LB].fY + (float)nHeight;
-            if (m_bTile)
+            if (m_bTile && m_pTexture != nullptr)
                 m_aTexCoord[LT].fTV = m_aTexCoord[RT].fTV = m_aTexCoord[LB].fTV - nHeight / m_pTexture->Height;
         }
         else
         {
             m_aScrCoord[LB].fY = m_aScrCoord[RB].fY = m_aScrCoord[LT].fY - (float)nHeight;
-            if (m_bTile)
+            if (m_bTile && m_pTexture != nullptr)
                 m_aTexCoord[LB].fTV = m_aTexCoord[RB].fTV = nHeight / m_pTexture->Height;
         }
     }

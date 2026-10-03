@@ -44,9 +44,9 @@ void CreateTerrain(wchar_t* FileName, bool bNew = false);
 
 bool IsTerrainHeightExtMap(int iWorld);
 
-int OpenTerrainMapping(wchar_t* FileName);
+int OpenTerrainMapping(wchar_t* FileName, int clientWorld = -1);
 bool SaveTerrainMapping(wchar_t* FileName, int iMapNumber);
-int OpenTerrainAttribute(wchar_t* FileName);
+int OpenTerrainAttribute(wchar_t* FileName, int clientWorld = -1);
 bool SaveTerrainAttribute(wchar_t* FileName, int iMapNumber);
 
 //  속성 변경.

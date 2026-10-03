@@ -7,6 +7,7 @@
 #include "UI/NewUI/Widgets/NewUIButton.h"
 
 constexpr auto MAX_MASTER_SKILL_DATA = 512;
+constexpr auto MAX_MASTER_SKILL_TREE_DATA = 2048;
 
 constexpr auto MAX_MASTER_SKILL_CATEGORY = 3;
 constexpr auto MAX_MASTER_SKILL_REQUIRES = 2;
@@ -119,7 +120,7 @@ namespace SEASON3B
         DWORD ClassNameTextIndex;
 
         std::map<ActionSkillType, _MASTER_SKILL_TOOLTIP> map_masterSkillToolTip;
-        std::map<BYTE, _MASTER_SKILLTREE_DATA> map_masterData;
+        std::map<WORD, _MASTER_SKILLTREE_DATA> map_masterData;
         
         CNewUIManager* m_pNewUIMng;
 
