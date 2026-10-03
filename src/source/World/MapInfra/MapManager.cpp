@@ -1173,6 +1173,26 @@ void CMapManager::Load() // OK
     }
 }
 
+namespace
+{
+
+constexpr int kTerrainMismatchTextCapacity = 256;
+
+void LogTerrainWorldMismatch(const wchar_t* fileName, int mapNumber, int clientWorld)
+{
+    if (mapNumber < 0 || mapNumber == clientWorld)
+    {
+        return;
+    }
+
+    wchar_t text[kTerrainMismatchTextCapacity];
+    mu_swprintf(text, L"%ls file map number %d does not match world %d.", fileName, mapNumber, clientWorld);
+    g_ErrorReport.Write(text);
+    g_ErrorReport.Write(L"\r\n");
+}
+
+} // namespace
+
 void CMapManager::LoadWorld(int Map)
 {
     if (Map == 32 && this->WorldActive == 32)
@@ -1226,15 +1246,8 @@ void CMapManager::LoadWorld(int Map)
     mu_swprintf(WorldName, L"World%d", iMapWorld);
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.map", WorldName, iMapWorld);
 
-    int iResult = OpenTerrainMapping(FileName);
-
-    if (iMapWorld != iResult && -1 != iResult)
-    {
-        wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file map number %d does not match world %d.", FileName, iResult, iMapWorld);
-        g_ErrorReport.Write(Text);
-        g_ErrorReport.Write(L"\r\n");
-    }
+    int iResult = OpenTerrainMapping(FileName, iMapWorld);
+    LogTerrainWorldMismatch(FileName, iResult, iMapWorld);
 
     if (this->WorldActive == WD_73NEW_LOGIN_SCENE)
     {
@@ -1287,25 +1300,13 @@ void CMapManager::LoadWorld(int Map)
         {
             mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.att", WorldName, iMapWorld);
         }
-    iResult = OpenTerrainAttribute(FileName);
-    if (iMapWorld != iResult && -1 != iResult)
-    {
-        wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file map number %d does not match world %d.", FileName, iResult, iMapWorld);
-        g_ErrorReport.Write(Text);
-        g_ErrorReport.Write(L"\r\n");
-    }
+    iResult = OpenTerrainAttribute(FileName, iMapWorld);
+    LogTerrainWorldMismatch(FileName, iResult, iMapWorld);
 
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.obj", WorldName, iMapWorld);
 
-    iResult = OpenObjectsEnc(FileName);
-    if (iMapWorld != iResult && -1 != iResult)
-    {
-        wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file map number %d does not match world %d.", FileName, iResult, iMapWorld);
-        g_ErrorReport.Write(Text);
-        g_ErrorReport.Write(L"\r\n");
-    }
+    iResult = OpenObjectsEnc(FileName, iMapWorld);
+    LogTerrainWorldMismatch(FileName, iResult, iMapWorld);
 
     mu_swprintf(FileName, L"%ls\\TerrainHeight.bmp", WorldName);
     if (IsTerrainHeightExtMap(this->WorldActive) == true)

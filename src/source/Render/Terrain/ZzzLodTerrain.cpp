@@ -150,9 +150,21 @@ void LogTerrainIssue(const wchar_t* fileName, const std::string& error)
     MU_LOG_ERROR(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(fileName), error);
 }
 
+int AcceptLoadedTerrainWorld(const wchar_t* fileName, const char* kind, bool season21, int embeddedMapNumber,
+                             int clientWorld)
+{
+    if (season21)
+    {
+        MU_LOG_INFO(mu::log::Get("data"),
+                    "Loaded Season 21 terrain {} {} (embedded id {}, client world {})",
+                    kind, mu_wchar_to_utf8(fileName), embeddedMapNumber, clientWorld);
+    }
+    return Render::Terrain::AcceptedTerrainWorld(season21, embeddedMapNumber, clientWorld);
+}
+
 } // namespace
 
-int OpenTerrainAttribute(wchar_t* FileName)
+int OpenTerrainAttribute(wchar_t* FileName, int clientWorld)
 {
     FILE* fp = _wfopen(FileName, L"rb");
     if (fp == NULL)
@@ -212,12 +224,7 @@ int OpenTerrainAttribute(wchar_t* FileName)
         MU_LOG_WARN(mu::log::Get("data"), "{} attribute header does not match Season 6 checks; using it anyway",
                     mu_wchar_to_utf8(FileName));
     }
-    if (document.season21)
-    {
-        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain attributes {}", mu_wchar_to_utf8(FileName));
-    }
-
-    return document.mapNumber;
+    return AcceptLoadedTerrainWorld(FileName, "attributes", document.season21, document.mapNumber, clientWorld);
 }
 
 bool SaveTerrainAttribute(wchar_t* FileName, int iMap)
@@ -304,7 +311,7 @@ void SetTerrainWaterState(std::list<int>& terrainIndex, int state)
     }
 }
 
-int OpenTerrainMapping(wchar_t* FileName) {
+int OpenTerrainMapping(wchar_t* FileName, int clientWorld) {
     InitTerrainMappingLayer();
     FILE* fp = _wfopen(FileName, L"rb");
     if (fp == NULL) {
@@ -325,20 +332,13 @@ int OpenTerrainMapping(wchar_t* FileName) {
     for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; i++) {
         TerrainMappingAlpha[i] = static_cast<float>(document.alpha[static_cast<std::size_t>(i)]) / 255.f;
     }
-    if (document.season21)
-    {
-        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain map {}", mu_wchar_to_utf8(FileName));
-    }
-
-    const int iMapNumber = document.mapNumber;
-
     TerrainGrassEnable = true;
 
     if (gMapManager.InChaosCastle() || gMapManager.InBattleCastle()) {
         TerrainGrassEnable = false;
     }
 
-    return iMapNumber;
+    return AcceptLoadedTerrainWorld(FileName, "map", document.season21, document.mapNumber, clientWorld);
 }
 
 bool SaveTerrainMapping(wchar_t* FileName, int iMapNumber)

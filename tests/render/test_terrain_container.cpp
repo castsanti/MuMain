@@ -122,6 +122,29 @@ TEST_CASE("Season 21 object list stops at the end of the buffer")
     CHECK(document.error.find("extends past") != std::string::npos);
 }
 
+TEST_CASE("Season 21 terrain id is the client world that requested the file")
+{
+    CHECK(AcceptedTerrainWorld(true, 167, 34) == 34);
+    CHECK(AcceptedTerrainWorld(true, 58, 34) == 34);
+    CHECK(AcceptedTerrainWorld(false, 33, 34) == 33);
+    CHECK(AcceptedTerrainWorld(true, 167, kUnspecifiedClientWorld) == 167);
+
+    const std::vector<std::uint8_t> mapFile = WithSeason21Header("MAP", MapCipher(167, 9));
+    const TerrainMapDocument map = DecodeTerrainMap(mapFile.data(), mapFile.size());
+    REQUIRE(map.ok);
+    CHECK(map.season21);
+    CHECK(map.mapNumber == 167);
+    CHECK(map.layer1.front() == 9);
+    CHECK(AcceptedTerrainWorld(map.season21, map.mapNumber, 34) == 34);
+
+    const std::vector<std::uint8_t> attributeFile = WithSeason21Header("ATT", AttributeCipher(58, 5));
+    const TerrainAttributeDocument attribute = DecodeTerrainAttribute(attributeFile.data(), attributeFile.size());
+    REQUIRE(attribute.ok);
+    CHECK(attribute.mapNumber == 58);
+    CHECK(attribute.walls.front() == 5);
+    CHECK(AcceptedTerrainWorld(attribute.season21, attribute.mapNumber, 34) == 34);
+}
+
 TEST_CASE("a Season 21 magic with the wrong payload size fails soft")
 {
     const std::uint8_t bytes[] = {'M', 'A', 'P', 1, 1, 2, 3, 4};

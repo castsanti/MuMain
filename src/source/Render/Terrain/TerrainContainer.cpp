@@ -245,4 +245,13 @@ TerrainObjectDocument DecodeTerrainObjects(const std::uint8_t* bytes, std::size_
     return document;
 }
 
+int AcceptedTerrainWorld(bool season21, int embeddedMapNumber, int clientWorld)
+{
+    if (!season21 || clientWorld == kUnspecifiedClientWorld)
+    {
+        return embeddedMapNumber;
+    }
+    return clientWorld;
+}
+
 } // namespace Render::Terrain
