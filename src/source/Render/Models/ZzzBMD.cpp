@@ -3239,6 +3239,75 @@ void ApplyActionOrder(BMD& model, const std::vector<int>& order)
     }
 }
 
+const Bone_t* FindNamedBone(const BMD& model, const char* name)
+{
+    for (int bone = 0; bone < model.NumBones; ++bone)
+    {
+        if (!model.Bones[bone].Dummy && std::strcmp(model.Bones[bone].Name, name) == 0)
+        {
+            return &model.Bones[bone];
+        }
+    }
+    return nullptr;
+}
+
+void WritePoseSample(std::int16_t* destination, const BoneMatrix_t* matrix, int key)
+{
+    constexpr std::int16_t kMissing = 0x7FFF;
+    if (matrix == nullptr || matrix->Rotation == nullptr || key < 0)
+    {
+        destination[0] = kMissing;
+        destination[1] = kMissing;
+        destination[2] = kMissing;
+        return;
+    }
+    destination[0] = Render::Models::QuantizePlayerAngle(matrix->Rotation[key][0]);
+    destination[1] = Render::Models::QuantizePlayerAngle(matrix->Rotation[key][1]);
+    destination[2] = Render::Models::QuantizePlayerAngle(matrix->Rotation[key][2]);
+}
+
+std::uint32_t PoseCrc(const BMD& model, int action)
+{
+    const int keys = model.Actions[action].NumAnimationKeys;
+    constexpr int kAngles = Render::Models::kSeason6PlayerBoneCount * Render::Models::kPlayerPoseSamples * 3;
+    std::int16_t angles[kAngles];
+    const int lastKey = keys > 0 ? keys - 1 : -1;
+    for (int bone = 0; bone < Render::Models::kSeason6PlayerBoneCount; ++bone)
+    {
+        const Bone_t* named = FindNamedBone(model, Render::Models::Season6PlayerBoneName(bone));
+        const BoneMatrix_t* matrix =
+            named != nullptr && named->BoneMatrixes != nullptr ? &named->BoneMatrixes[action] : nullptr;
+        const int sample = bone * 3;
+        const int second = (Render::Models::kSeason6PlayerBoneCount + bone) * 3;
+        WritePoseSample(angles + sample, matrix, keys > 0 ? 0 : -1);
+        WritePoseSample(angles + second, matrix, lastKey);
+    }
+    return Render::Models::HashPlayerPose(static_cast<std::uint16_t>(keys),
+                                          static_cast<std::uint8_t>(model.Actions[action].LockPositions), angles,
+                                          kAngles);
+}
+
+bool MatchPlayerActions(const BMD& model, std::vector<int>& season6ToLoaded, bool& matchedByPose)
+{
+    std::vector<std::uint32_t> motion(static_cast<std::size_t>(model.NumActions));
+    for (int action = 0; action < model.NumActions; ++action)
+    {
+        motion[static_cast<std::size_t>(action)] = MotionCrc(model, action);
+    }
+    if (Render::Models::MapSeason6PlayerActions(motion.data(), model.NumActions, season6ToLoaded.data()))
+    {
+        matchedByPose = false;
+        return true;
+    }
+
+    for (int action = 0; action < model.NumActions; ++action)
+    {
+        motion[static_cast<std::size_t>(action)] = PoseCrc(model, action);
+    }
+    matchedByPose = Render::Models::MapSeason6PlayerPoses(motion.data(), model.NumActions, season6ToLoaded.data());
+    return matchedByPose;
+}
+
 void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
 {
     if (!IsPlayerModelFile(modelFileName) || model.NumActions <= Render::Models::kSeason6PlayerActionCount)
@@ -3246,14 +3315,9 @@ void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
         return;
     }
 
-    std::vector<std::uint32_t> motion(static_cast<std::size_t>(model.NumActions));
-    for (int action = 0; action < model.NumActions; ++action)
-    {
-        motion[static_cast<std::size_t>(action)] = MotionCrc(model, action);
-    }
-
     std::vector<int> season6ToLoaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount));
-    if (!Render::Models::MapSeason6PlayerActions(motion.data(), model.NumActions, season6ToLoaded.data()))
+    bool matchedByPose = false;
+    if (!MatchPlayerActions(model, season6ToLoaded, matchedByPose))
     {
         wprintf(L"[Open2] player.bmd has %d actions and does not match the Season 6 clips\n", model.NumActions);
         return;
@@ -3290,7 +3354,8 @@ void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
         }
     }
     ApplyActionOrder(model, order);
-    wprintf(L"[Open2] Aligned Season 21 player.bmd actions (%d clips) to Season 6 indices\n", model.NumActions);
+    wprintf(L"[Open2] Aligned Season 21 player.bmd actions (%d clips) to Season 6 indices%s\n", model.NumActions,
+            matchedByPose ? L" by pose" : L"");
 }
 
 } // namespace

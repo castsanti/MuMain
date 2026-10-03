@@ -42,6 +42,37 @@ TEST_CASE("an inserted clip shifts later Season 6 player actions")
     CHECK(season6ToLoaded.back() == Render::Models::kSeason6PlayerActionCount);
 }
 
+TEST_CASE("Season 6 player poses map onto themselves")
+{
+    std::vector<std::uint32_t> loaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount));
+    Render::Models::CopySeason6PlayerPose(loaded.data(), static_cast<int>(loaded.size()));
+    std::vector<int> season6ToLoaded(loaded.size(), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerPoses(loaded.data(), static_cast<int>(loaded.size()),
+                                                 season6ToLoaded.data()));
+    CHECK(season6ToLoaded[1] == 1);
+}
+
+TEST_CASE("a pose inserted ahead of idle moves the Season 6 idle clip")
+{
+    std::vector<std::uint32_t> loaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount));
+    Render::Models::CopySeason6PlayerPose(loaded.data(), static_cast<int>(loaded.size()));
+    loaded.insert(loaded.begin(), 0xC4A65E01u);
+
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerPoses(loaded.data(), static_cast<int>(loaded.size()),
+                                                 season6ToLoaded.data()));
+    CHECK(season6ToLoaded[0] == 1);
+    CHECK(season6ToLoaded[1] == 2);
+}
+
+TEST_CASE("player pose angles round halfway away from zero")
+{
+    CHECK(Render::Models::QuantizePlayerAngle(0.1f) == 1);
+    CHECK(Render::Models::QuantizePlayerAngle(-0.1f) == -1);
+    CHECK(Render::Models::QuantizePlayerAngle(0.05f) == 1);
+    CHECK(Render::Models::QuantizePlayerAngle(-0.05f) == -1);
+}
+
 TEST_CASE("a player file that dropped a Season 6 clip is not remapped")
 {
     std::vector<std::uint32_t> loaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount));
