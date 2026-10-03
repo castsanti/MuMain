@@ -24,8 +24,12 @@ constexpr int kPlayerPoseSamples = 2;
 // by placing these clips.
 constexpr int kSeason6IdleActionCount = 4;
 constexpr int kSeason6IdlePoseAngles = kSeason6PlayerBoneCount * kPlayerPoseSamples * 3;
-constexpr int kIdlePoseDistanceLimit = 80;
-constexpr float kIdleTravelLimit = 8.f;
+// Path length of the root bone. Male idle is 0.07. Female and summoner sway
+// stays under 5. A walk covers about 245, including a loop that ends where
+// it started.
+constexpr float kStandingPathLimit = 5.f;
+// Largest single root step of those idles. A walk step is about 50.
+constexpr float kStandingStepLimit = 1.f;
 
 std::uint32_t HashPlayerMotion(std::uint32_t crc, const void* bytes, std::size_t size);
 
@@ -70,11 +74,13 @@ void CopySeason6IdlePose(int idleSlot, std::int16_t* destination, int count);
 
 int PlayerPoseDistance(const std::int16_t* left, const std::int16_t* right, int count);
 
-// Fills idle slots that are still -1 with a low-travel clip near that Season 6
-// idle. loadedAngles is loadedCount poses of kSeason6IdlePoseAngles.
-// Returns how many idles were placed.
-int PlaceSeason6IdleClips(const std::int16_t* loadedAngles, const float* travel, int loadedCount,
-                          int* season6ToLoaded);
+// Puts a standing clip on idle actions 1, 2, 3, and 283. pathLength is the
+// sum of root steps and maxStep is the longest one. A clip already assigned
+// there is kept when it stands. A walk is swapped for the standing clip
+// whose pose is nearest that Season 6 idle. loadedAngles is loadedCount
+// poses of kSeason6IdlePoseAngles. Returns how many idle slots changed.
+int PlaceSeason6IdleClips(const std::int16_t* loadedAngles, const float* pathLength, const float* maxStep,
+                          int loadedCount, int* season6ToLoaded);
 
 // Fills -1 entries. A free Season 6 index keeps the clip already stored there.
 void CompleteSeason6ActionMap(int* season6ToLoaded, int loadedCount);

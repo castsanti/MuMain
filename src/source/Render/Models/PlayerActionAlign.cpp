@@ -265,53 +265,113 @@ int PlayerPoseDistance(const std::int16_t* left, const std::int16_t* right, int 
     return distance;
 }
 
-int PlaceSeason6IdleClips(const std::int16_t* loadedAngles, const float* travel, int loadedCount, int* season6ToLoaded)
+namespace
 {
-    if (loadedAngles == nullptr || travel == nullptr || season6ToLoaded == nullptr || loadedCount <= 0)
-    {
-        return 0;
-    }
 
-    std::vector<char> claimed(static_cast<std::size_t>(loadedCount), 0);
+bool IsStandingTravel(float pathLength, float maxStep)
+{
+    return pathLength <= kStandingPathLimit && maxStep <= kStandingStepLimit;
+}
+
+bool ClipInRange(int loaded, int loadedCount)
+{
+    return loaded >= 0 && loaded < loadedCount;
+}
+
+bool KeptStandingIdle(const int* season6ToLoaded, const float* pathLength, const float* maxStep, int loaded,
+                      int loadedCount)
+{
+    if (!ClipInRange(loaded, loadedCount) || !IsStandingTravel(pathLength[loaded], maxStep[loaded]))
+    {
+        return false;
+    }
+    for (int slot = 0; slot < kSeason6IdleActionCount; ++slot)
+    {
+        if (season6ToLoaded[kSeason6IdleAction[slot]] == loaded)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+int FindStandingClip(const std::int16_t* loadedAngles, const float* pathLength, const float* maxStep, int loadedCount,
+                     const int* season6ToLoaded, const std::int16_t* idlePose)
+{
+    int best = -1;
+    int bestDistance = 0;
+    for (int loaded = 0; loaded < loadedCount; ++loaded)
+    {
+        if (!IsStandingTravel(pathLength[loaded], maxStep[loaded]))
+        {
+            continue;
+        }
+        if (KeptStandingIdle(season6ToLoaded, pathLength, maxStep, loaded, loadedCount))
+        {
+            continue;
+        }
+        const int distance = PlayerPoseDistance(loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
+                                                idlePose, kSeason6IdlePoseAngles);
+        if (best < 0 || distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = loaded;
+        }
+    }
+    return best;
+}
+
+int ActionUsingClip(const int* season6ToLoaded, int loaded)
+{
     for (int index = 0; index < kSeason6PlayerActionCount; ++index)
     {
-        const int loaded = season6ToLoaded[index];
-        if (loaded >= 0 && loaded < loadedCount)
+        if (season6ToLoaded[index] == loaded)
         {
-            claimed[static_cast<std::size_t>(loaded)] = 1;
+            return index;
         }
+    }
+    return -1;
+}
+
+} // namespace
+
+int PlaceSeason6IdleClips(const std::int16_t* loadedAngles, const float* pathLength, const float* maxStep,
+                          int loadedCount, int* season6ToLoaded)
+{
+    if (loadedAngles == nullptr || pathLength == nullptr || maxStep == nullptr || season6ToLoaded == nullptr ||
+        loadedCount <= 0)
+    {
+        return 0;
     }
 
     int placed = 0;
     for (int idleSlot = 0; idleSlot < kSeason6IdleActionCount; ++idleSlot)
     {
         const int action = kSeason6IdleAction[idleSlot];
-        if (season6ToLoaded[action] >= 0)
+        const int current = season6ToLoaded[action];
+        if (ClipInRange(current, loadedCount) && IsStandingTravel(pathLength[current], maxStep[current]))
         {
             continue;
         }
-        int best = -1;
-        int bestDistance = kIdlePoseDistanceLimit + 1;
-        for (int loaded = 0; loaded < loadedCount; ++loaded)
-        {
-            if (claimed[static_cast<std::size_t>(loaded)] != 0 || travel[loaded] > kIdleTravelLimit)
-            {
-                continue;
-            }
-            const int distance = PlayerPoseDistance(loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
-                                                    kSeason6IdlePose[idleSlot], kSeason6IdlePoseAngles);
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                best = loaded;
-            }
-        }
+
+        const int best = FindStandingClip(loadedAngles, pathLength, maxStep, loadedCount, season6ToLoaded,
+                                          kSeason6IdlePose[idleSlot]);
         if (best < 0)
         {
+            if (current >= 0)
+            {
+                season6ToLoaded[action] = -1;
+                ++placed;
+            }
             continue;
         }
+
+        const int owner = ActionUsingClip(season6ToLoaded, best);
         season6ToLoaded[action] = best;
-        claimed[static_cast<std::size_t>(best)] = 1;
+        if (owner >= 0 && owner != action)
+        {
+            season6ToLoaded[owner] = current;
+        }
         ++placed;
     }
     return placed;

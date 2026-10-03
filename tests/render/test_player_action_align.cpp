@@ -114,9 +114,38 @@ TEST_CASE("a charge stored at idle is replaced by the standing clip")
     constexpr int kStandingClip = 20;
     Render::Models::CopySeason6IdlePose(0, loaded.data() + static_cast<std::size_t>(kStandingClip) * kAngles, kAngles);
 
-    std::vector<float> travel(static_cast<std::size_t>(kActions), 100.f);
-    travel[static_cast<std::size_t>(kStandingClip)] = 0.f;
+    std::vector<float> path(static_cast<std::size_t>(kActions), 200.f);
+    std::vector<float> step(static_cast<std::size_t>(kActions), 40.f);
+    path[static_cast<std::size_t>(kStandingClip)] = 0.07f;
+    step[static_cast<std::size_t>(kStandingClip)] = 0.02f;
     std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
-    REQUIRE(Render::Models::PlaceSeason6IdleClips(loaded.data(), travel.data(), kActions, season6ToLoaded.data()) >= 1);
+    REQUIRE(Render::Models::PlaceSeason6IdleClips(loaded.data(), path.data(), step.data(), kActions,
+                                                 season6ToLoaded.data()) >= 1);
     CHECK(season6ToLoaded[1] == kStandingClip);
+}
+
+TEST_CASE("a looping walk is not used as the idle clip")
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    std::vector<std::int16_t> loaded(static_cast<std::size_t>(kActions) * kAngles, 0);
+    constexpr int kWalkClip = 15;
+    constexpr int kStandingClip = 20;
+    Render::Models::CopySeason6IdlePose(0, loaded.data() + static_cast<std::size_t>(kStandingClip) * kAngles, kAngles);
+    Render::Models::CopySeason6IdlePose(0, loaded.data() + static_cast<std::size_t>(kWalkClip) * kAngles, kAngles);
+
+    std::vector<float> path(static_cast<std::size_t>(kActions), 30.f);
+    std::vector<float> step(static_cast<std::size_t>(kActions), 8.f);
+    path[static_cast<std::size_t>(kWalkClip)] = 245.f;
+    step[static_cast<std::size_t>(kWalkClip)] = 50.f;
+    path[static_cast<std::size_t>(kStandingClip)] = 0.07f;
+    step[static_cast<std::size_t>(kStandingClip)] = 0.02f;
+
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
+    season6ToLoaded[1] = kWalkClip;
+    season6ToLoaded[40] = kStandingClip;
+    REQUIRE(Render::Models::PlaceSeason6IdleClips(loaded.data(), path.data(), step.data(), kActions,
+                                                 season6ToLoaded.data()) >= 1);
+    CHECK(season6ToLoaded[1] == kStandingClip);
+    CHECK(season6ToLoaded[40] == kWalkClip);
 }
