@@ -1,4 +1,11 @@
 mu_add_test(
+    NAME test_bmd_container
+    SOURCES
+        test_bmd_container.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Models/BmdContainer.cpp
+)
+
+mu_add_test(
     NAME frame_pixel_readback_tests
     SOURCES
         test_frame_pixel_readback.cpp

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/Models/MapFileCrypt.h"
+
 extern vec3_t		 PrimaryTerrainLight[];
 extern vec3_t		 BackTerrainLight[];
 extern vec3_t		 TerrainLight[];
@@ -144,40 +146,10 @@ extern FrustrumMap_t g_FrustrumMap; //전체 프러스텀과 별개로 아이디
 
 inline int MapFileEncrypt(BYTE* pbyDst, BYTE* pbySrc, int iSize)
 {
-    if (!pbyDst)
-    {
-        return (iSize);
-    }
-    BYTE byMapXorKey[16] = { 0xD1, 0x73, 0x52, 0xF6, 0xD2, 0x9A, 0xCB, 0x27,
-                            0x3E, 0xAF, 0x59, 0x31, 0x37, 0xB3, 0xE7, 0xA2 };
-
-    WORD wMapKey = 0x5E;
-    for (int i = 0; i < iSize; ++i)
-    {
-        pbyDst[i] = (pbySrc[i] + (BYTE)wMapKey) ^ byMapXorKey[i % 16];
-
-        wMapKey = pbyDst[i] + 0x3D;
-        wMapKey = wMapKey & 0xFF;
-    }
-
-    return (iSize);
+    return Render::Models::EncryptMapFile(pbyDst, pbySrc, iSize);
 }
 
 inline int MapFileDecrypt(BYTE* pbyDst, BYTE* pbySrc, int iSize)
 {
-    if (!pbyDst)
-    {
-        return (iSize);
-    }
-    BYTE byMapXorKey[16] = { 0xD1, 0x73, 0x52, 0xF6, 0xD2, 0x9A, 0xCB, 0x27,
-                            0x3E, 0xAF, 0x59, 0x31, 0x37, 0xB3, 0xE7, 0xA2 };
-
-    WORD wMapKey = 0x5E;
-    for (int i = 0; i < iSize; ++i)
-    {
-        pbyDst[i] = (pbySrc[i] ^ byMapXorKey[i % 16]) - (BYTE)wMapKey;
-        wMapKey = pbySrc[i] + 0x3D;
-        wMapKey = wMapKey & 0xFF;
-    }
-    return (iSize);
+    return Render::Models::DecryptMapFile(pbyDst, pbySrc, iSize);
 }
