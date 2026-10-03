@@ -15,6 +15,7 @@ namespace
 #include "PlayerPose.inc"
 #include "PlayerCoarsePose.inc"
 #include "PlayerMotionClass.inc"
+#include "PlayerActionNames.inc"
 
 static_assert(sizeof(kSeason6PlayerBones) / sizeof(kSeason6PlayerBones[0]) == kSeason6PlayerBoneCount);
 static_assert(sizeof(kSeason6PlayerPose) / sizeof(kSeason6PlayerPose[0]) == kSeason6PlayerActionCount);
@@ -22,6 +23,7 @@ static_assert(sizeof(kSeason6PlayerCoarsePose) / sizeof(kSeason6PlayerCoarsePose
 static_assert(sizeof(kSeason6IdleAction) / sizeof(kSeason6IdleAction[0]) == kSeason6IdleActionCount);
 static_assert(sizeof(kSeason6MotionClass) / sizeof(kSeason6MotionClass[0]) == kSeason6PlayerActionCount);
 static_assert(sizeof(kSeason6MotionPose) / sizeof(kSeason6MotionPose[0]) == kSeason6PlayerActionCount);
+static_assert(sizeof(kSeason6ActionName) / sizeof(kSeason6ActionName[0]) == kSeason6PlayerActionCount);
 
 constexpr std::uint32_t kCrcPolynomial = 0xEDB88320u;
 
@@ -474,6 +476,140 @@ int MapSeason6PlayerMotions(const std::int16_t* loadedAngles, const float* pathL
     AssignSameClass(loadedAngles, loadedClass.data(), loadedCount, season6ToLoaded, clipUsed);
     AssignLeftoverClips(loadedAngles, loadedCount, season6ToLoaded, clipUsed);
     return CountClassMatches(loadedClass.data(), loadedCount, season6ToLoaded);
+}
+
+const char* Season6ActionName(int action)
+{
+    if (action < 0 || action >= kSeason6PlayerActionCount)
+    {
+        return "";
+    }
+    return kSeason6ActionName[action];
+}
+
+namespace
+{
+
+constexpr const char* kAttackEndAlias = "PLAYER_FLY_RIDE";
+
+const char* ActionBasename(const char* name)
+{
+    const char* base = name;
+    for (const char* cursor = name; *cursor != '\0'; ++cursor)
+    {
+        if (*cursor == '\\' || *cursor == '/')
+        {
+            base = cursor + 1;
+        }
+    }
+    return base;
+}
+
+bool NameMatchesAction(const char* loaded, const char* action)
+{
+    if (loaded == nullptr || loaded[0] == '\0' || action == nullptr)
+    {
+        return false;
+    }
+    const char* base = ActionBasename(loaded);
+    const std::size_t actionLength = std::strlen(action);
+    if (std::strncmp(base, action, actionLength) != 0)
+    {
+        return false;
+    }
+    return base[actionLength] == '\0' || std::strcmp(base + actionLength, ".smd") == 0;
+}
+
+int FindNamedClip(const char* const* loadedNames, int loadedCount, const std::vector<char>& used, const char* action)
+{
+    for (int loaded = 0; loaded < loadedCount; ++loaded)
+    {
+        if (used[static_cast<std::size_t>(loaded)] != 0)
+        {
+            continue;
+        }
+        if (NameMatchesAction(loadedNames[loaded], action))
+        {
+            return loaded;
+        }
+    }
+    return -1;
+}
+
+int PoseCostAt(const std::int16_t* loadedAngles, int loaded, int action)
+{
+    std::int16_t reference[kSeason6IdlePoseAngles];
+    CopySeason6MotionPose(action, reference, kSeason6IdlePoseAngles);
+    return PlayerPoseDistance(reference, loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
+                              kSeason6IdlePoseAngles);
+}
+
+bool RidingSkillClipsInserted(const std::int16_t* loadedAngles, int loadedCount)
+{
+    constexpr int kAnchors[] = {kSeason6DefenseAction, kSeason6DieAction, kSeason6RageIdleAction};
+    if (kSeason6RageIdleAction + kSeason21RidingSkillCount >= loadedCount)
+    {
+        return false;
+    }
+    int sameCost = 0;
+    int shiftedCost = 0;
+    for (const int anchor : kAnchors)
+    {
+        sameCost += PoseCostAt(loadedAngles, anchor, anchor);
+        shiftedCost += PoseCostAt(loadedAngles, anchor + kSeason21RidingSkillCount, anchor);
+    }
+    return shiftedCost < sameCost && shiftedCost * 2 < sameCost;
+}
+
+} // namespace
+
+int MapSeason6PlayerActionsByNames(const char* const* loadedNames, int loadedCount, int* season6ToLoaded)
+{
+    if (loadedNames == nullptr || season6ToLoaded == nullptr || loadedCount <= 0)
+    {
+        return -1;
+    }
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        season6ToLoaded[action] = -1;
+    }
+    std::vector<char> used(static_cast<std::size_t>(loadedCount), 0);
+    int matched = 0;
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        int loaded = FindNamedClip(loadedNames, loadedCount, used, kSeason6ActionName[action]);
+        if (loaded < 0 && action == kSeason6AttackEndAction)
+        {
+            loaded = FindNamedClip(loadedNames, loadedCount, used, kAttackEndAlias);
+        }
+        if (loaded < 0)
+        {
+            continue;
+        }
+        season6ToLoaded[action] = loaded;
+        used[static_cast<std::size_t>(loaded)] = 1;
+        ++matched;
+    }
+    return matched;
+}
+
+bool MapSeason6PlayerActionList(const std::int16_t* loadedAngles, int loadedCount, int* season6ToLoaded)
+{
+    if (season6ToLoaded == nullptr || loadedCount < kSeason6PlayerActionCount)
+    {
+        return false;
+    }
+    const bool riding = loadedAngles != nullptr && RidingSkillClipsInserted(loadedAngles, loadedCount);
+    const int shift = riding ? kSeason21RidingSkillCount : 0;
+    if (kSeason6RageIdleAction + shift >= loadedCount)
+    {
+        return false;
+    }
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        season6ToLoaded[action] = action < kSeason6DefenseAction ? action : action + shift;
+    }
+    return true;
 }
 
 namespace

@@ -113,4 +113,26 @@ void CopySeason6MotionPose(int action, std::int16_t* destination, int count);
 int MapSeason6PlayerMotions(const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
                             int loadedCount, int* season6ToLoaded);
 
+// PLAYER_DEFENSE1. Later Main builds insert the six riding-skill clips
+// immediately before this action. Walk, fly, wing idle, mount, and the
+// attacks before the emotes stay at the Season 6 index.
+constexpr int kSeason6AttackEndAction = 74;
+constexpr int kSeason6DefenseAction = 186;
+constexpr int kSeason6DieAction = 231;
+constexpr int kSeason6RageIdleAction = 283;
+constexpr int kSeason21RidingSkillCount = 6;
+
+const char* Season6ActionName(int action);
+
+// loadedNames is one C string per loaded clip, or nullptr when that clip
+// has no name. Writes the loaded index of each Season 6 action.
+// Returns how many Season 6 actions were named, or -1 when the inputs are unusable.
+int MapSeason6PlayerActionsByNames(const char* const* loadedNames, int loadedCount, int* season6ToLoaded);
+
+// Places every Season 6 action from the Main action list. When the file
+// contains the six riding-skill clips, emotes and later actions move forward
+// by that many slots. Walk, fly, wing idle, mount, and earlier attacks do not.
+// Returns false when the file is too short for that list.
+bool MapSeason6PlayerActionList(const std::int16_t* loadedAngles, int loadedCount, int* season6ToLoaded);
+
 }

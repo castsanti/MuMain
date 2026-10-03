@@ -4,6 +4,8 @@
 #include "stdafx.h"
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 #include <cmath>
 #include <cassert>
 #include <cctype>
@@ -3359,30 +3361,116 @@ void MeasureRootMotion(const BMD& model, int action, bool byIndex, float& pathLe
     meanHeight = heightSum / static_cast<float>(keys);
 }
 
-const wchar_t* MatchPlayerActions(const BMD& model, bool byIndex, std::vector<int>& season6ToLoaded)
+bool ActionNameBytes(const unsigned char* bytes)
 {
+    int length = 0;
+    while (length < 32 && bytes[length] != 0)
+    {
+        const unsigned char character = bytes[length];
+        const bool letter = (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z');
+        const bool digit = character >= '0' && character <= '9';
+        if (!letter && !digit && character != '_')
+        {
+            return false;
+        }
+        ++length;
+    }
+    if (length == 0 || length == 32)
+    {
+        return false;
+    }
+    for (int index = length; index < 32; ++index)
+    {
+        if (bytes[index] != 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void ReadTrailingActionNames(const unsigned char* data, int offset, int size, int actionCount,
+                             std::vector<std::string>& names)
+{
+    names.clear();
+    constexpr int kNameBytes = 32;
+    if (data == nullptr || actionCount <= 0 || offset < 0 || size < offset)
+    {
+        return;
+    }
+    const int tail = size - offset;
+    if (tail < actionCount * kNameBytes)
+    {
+        return;
+    }
+    int named = 0;
+    bool sawPlayerAction = false;
+    for (int action = 0; action < actionCount; ++action)
+    {
+        const unsigned char* bytes = data + offset + action * kNameBytes;
+        if (!ActionNameBytes(bytes))
+        {
+            continue;
+        }
+        ++named;
+        if (std::strncmp(reinterpret_cast<const char*>(bytes), "PLAYER_", 7) == 0)
+        {
+            sawPlayerAction = true;
+        }
+    }
+    if (!sawPlayerAction || named * 5 < actionCount * 4)
+    {
+        return;
+    }
+    names.resize(static_cast<std::size_t>(actionCount));
+    for (int action = 0; action < actionCount; ++action)
+    {
+        const unsigned char* bytes = data + offset + action * kNameBytes;
+        if (ActionNameBytes(bytes))
+        {
+            names[static_cast<std::size_t>(action)].assign(reinterpret_cast<const char*>(bytes));
+        }
+    }
+}
+
+const wchar_t* MatchPlayerActions(const BMD& model, bool byIndex, const std::vector<std::string>& actionNames,
+                                  std::vector<int>& season6ToLoaded)
+{
+    if (static_cast<int>(actionNames.size()) == model.NumActions)
+    {
+        std::vector<const char*> names(static_cast<std::size_t>(model.NumActions));
+        for (int action = 0; action < model.NumActions; ++action)
+        {
+            names[static_cast<std::size_t>(action)] = actionNames[static_cast<std::size_t>(action)].c_str();
+        }
+        if (Render::Models::MapSeason6PlayerActionsByNames(names.data(), model.NumActions, season6ToLoaded.data()) ==
+            Render::Models::kSeason6PlayerActionCount)
+        {
+            return L"names";
+        }
+    }
+
     constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
     const int loadedCount = model.NumActions;
     std::vector<std::int16_t> angles(static_cast<std::size_t>(loadedCount) * static_cast<std::size_t>(kAngles));
-    std::vector<float> pathLength(static_cast<std::size_t>(loadedCount));
-    std::vector<float> meanHeight(static_cast<std::size_t>(loadedCount));
     for (int action = 0; action < loadedCount; ++action)
     {
         WriteActionPose(model, action, byIndex, Render::Models::kPlayerCoarsePoseStep,
                         angles.data() + static_cast<std::size_t>(action) * static_cast<std::size_t>(kAngles));
-        float maxStep = 0.f;
-        MeasureRootMotion(model, action, byIndex, pathLength[static_cast<std::size_t>(action)], maxStep,
-                          meanHeight[static_cast<std::size_t>(action)]);
     }
-    if (Render::Models::MapSeason6PlayerMotions(angles.data(), pathLength.data(), meanHeight.data(), loadedCount,
-                                               season6ToLoaded.data()) < 0)
+    if (!Render::Models::MapSeason6PlayerActionList(angles.data(), loadedCount, season6ToLoaded.data()))
     {
         return nullptr;
     }
-    return L"motion";
+    if (season6ToLoaded[static_cast<std::size_t>(Render::Models::kSeason6DefenseAction)] !=
+        Render::Models::kSeason6DefenseAction)
+    {
+        return L"riding";
+    }
+    return L"list";
 }
 
-void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
+void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName, const std::vector<std::string>& actionNames)
 {
     if (!IsPlayerModelFile(modelFileName) || model.NumActions < Render::Models::kSeason6PlayerActionCount)
     {
@@ -3392,7 +3480,7 @@ void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
     const int namedBones = CountSeason6BoneNames(model);
     const bool byIndex = namedBones < Render::Models::kSeason6PlayerBoneCount / 2;
     std::vector<int> season6ToLoaded(static_cast<std::size_t>(Render::Models::kSeason6PlayerActionCount));
-    const wchar_t* matchedBy = MatchPlayerActions(model, byIndex, season6ToLoaded);
+    const wchar_t* matchedBy = MatchPlayerActions(model, byIndex, actionNames, season6ToLoaded);
     const int idleSource = matchedBy == nullptr ? 1 : season6ToLoaded[1];
     float idleTravel = 0.f;
     float idleStep = 0.f;
@@ -3699,7 +3787,12 @@ bool BMD::Open2(const wchar_t* DirName, const wchar_t* ModelFileName, bool bReAl
         }
     }
 
-    AlignSeason21PlayerActions(*this, ModelFileName);
+    std::vector<std::string> actionNames;
+    if (containerStatus == Render::Models::BmdContainerStatus::Ok)
+    {
+        ReadTrailingActionNames(data, ptr, static_cast<int>(plain.bytes.size()), NumActions, actionNames);
+    }
+    AlignSeason21PlayerActions(*this, ModelFileName, actionNames);
 
     Init(false);
 

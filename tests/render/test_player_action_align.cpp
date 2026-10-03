@@ -2,8 +2,10 @@
 
 #include "Render/Models/PlayerActionAlign.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 TEST_CASE("player motion hash matches the standard CRC")
@@ -235,4 +237,106 @@ TEST_CASE("a foot walk stays on the ground and a wing idle stays in the air")
           static_cast<std::uint8_t>(Render::Models::PlayerMotionClass::GroundMove));
     CHECK(Render::Models::Season6MotionClass(kWingIdle) ==
           static_cast<std::uint8_t>(Render::Models::PlayerMotionClass::AirMove));
+}
+
+void CopyPose(std::vector<std::int16_t>& angles, int loaded, int action)
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    Render::Models::CopySeason6MotionPose(action, angles.data() + static_cast<std::size_t>(loaded) * kAngles, kAngles);
+}
+
+TEST_CASE("the Main action list keeps walk, fly, and wing idle on their Season 6 indices")
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    constexpr int kExtra = 40;
+    std::vector<std::int16_t> angles(static_cast<std::size_t>(kActions + kExtra) * kAngles, 0);
+    for (int action = 0; action < kActions; ++action)
+    {
+        CopyPose(angles, action, action);
+    }
+    std::swap_ranges(angles.begin() + static_cast<std::size_t>(15) * kAngles,
+                     angles.begin() + static_cast<std::size_t>(16) * kAngles,
+                     angles.begin() + static_cast<std::size_t>(36) * kAngles);
+
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerActionList(angles.data(), kActions + kExtra, season6ToLoaded.data()));
+    CHECK(season6ToLoaded[11] == 11);
+    CHECK(season6ToLoaded[15] == 15);
+    CHECK(season6ToLoaded[34] == 34);
+    CHECK(season6ToLoaded[36] == 36);
+    CHECK(season6ToLoaded[13] == 13);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(Render::Models::kSeason6DefenseAction)] ==
+          Render::Models::kSeason6DefenseAction);
+    CHECK(std::strcmp(Render::Models::Season6ActionName(15), "PLAYER_WALK_MALE") == 0);
+    CHECK(std::strcmp(Render::Models::Season6ActionName(11), "PLAYER_STOP_FLY") == 0);
+}
+
+TEST_CASE("riding skill clips inserted before the emotes shift only the later actions")
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    constexpr int kShift = Render::Models::kSeason21RidingSkillCount;
+    constexpr int kDefense = Render::Models::kSeason6DefenseAction;
+    const int loadedCount = kActions + kShift;
+    std::vector<std::int16_t> angles(static_cast<std::size_t>(loadedCount) * kAngles, 0);
+    for (int action = 0; action < kActions; ++action)
+    {
+        const int loaded = action < kDefense ? action : action + kShift;
+        CopyPose(angles, loaded, action);
+    }
+
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerActionList(angles.data(), loadedCount, season6ToLoaded.data()));
+    CHECK(season6ToLoaded[11] == 11);
+    CHECK(season6ToLoaded[15] == 15);
+    CHECK(season6ToLoaded[25] == 25);
+    CHECK(season6ToLoaded[34] == 34);
+    CHECK(season6ToLoaded[36] == 36);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(kDefense)] == kDefense + kShift);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(Render::Models::kSeason6DieAction)] ==
+          Render::Models::kSeason6DieAction + kShift);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(Render::Models::kSeason6RageIdleAction)] ==
+          Render::Models::kSeason6RageIdleAction + kShift);
+}
+
+TEST_CASE("named Season 21 clips map onto the Season 6 action of the same name")
+{
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    constexpr int kShift = Render::Models::kSeason21RidingSkillCount;
+    constexpr int kDefense = Render::Models::kSeason6DefenseAction;
+    const char* inserted[kShift] = {
+        "PLAYER_SKILL_GIGANTICSTORM_UNI", "PLAYER_SKILL_GIGANTICSTORM_DINO", "PLAYER_SKILL_GIGANTICSTORM_FENRIR",
+        "PLAYER_ATTACK_SKILL_WHEEL_UNI",  "PLAYER_ATTACK_SKILL_WHEEL_DINO",  "PLAYER_ATTACK_SKILL_WHEEL_FENRIR",
+    };
+    std::vector<std::string> storage;
+    storage.reserve(static_cast<std::size_t>(kActions + kShift));
+    for (int action = 0; action < kActions; ++action)
+    {
+        if (action == kDefense)
+        {
+            for (const char* name : inserted)
+            {
+                storage.emplace_back(name);
+            }
+        }
+        storage.emplace_back(Render::Models::Season6ActionName(action));
+    }
+    storage[static_cast<std::size_t>(Render::Models::kSeason6AttackEndAction)] = "Data/Player/PLAYER_FLY_RIDE.smd";
+
+    std::vector<const char*> names(storage.size());
+    for (std::size_t index = 0; index < storage.size(); ++index)
+    {
+        names[index] = storage[index].c_str();
+    }
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerActionsByNames(names.data(), static_cast<int>(names.size()),
+                                                          season6ToLoaded.data()) == kActions);
+    CHECK(season6ToLoaded[11] == 11);
+    CHECK(season6ToLoaded[15] == 15);
+    CHECK(season6ToLoaded[34] == 34);
+    CHECK(season6ToLoaded[36] == 36);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(kDefense)] == kDefense + kShift);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(Render::Models::kSeason6AttackEndAction)] ==
+          Render::Models::kSeason6AttackEndAction);
 }
