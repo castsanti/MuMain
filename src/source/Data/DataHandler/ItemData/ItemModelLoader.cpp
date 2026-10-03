@@ -11,6 +11,7 @@
 #include "Data/GameData/ItemData/ItemModelDatabase.h"
 #include "Data/GameData/ItemData/ItemModelGlowJson.h"
 #include "Data/GameData/ItemData/ItemModelSlots.h"
+#include "Data/GameData/ItemData/LocalItemTable.h"
 #include "Render/Models/ZzzBMD.h"
 
 #include <algorithm>
@@ -133,21 +134,38 @@ void CheckModel(int itemType, const ItemModelDefinition& model, const LookNames&
 }
 
 // Whether the file was opened.
-bool OpenModel(int itemType, const ItemModelDefinition& model, const LookNames& lookNames)
+bool OpenModelFile(int itemType, const ItemModelDefinition& model, const LookNames& lookNames, const std::string& file)
 {
-    const std::wstring path = ToLoaderPath(model.file);
+    const std::wstring path = ToLoaderPath(file);
     const size_t nameStart = path.find_last_of(LoaderSeparator) + 1; // 0 when there is no folder
     const std::wstring folder = path.substr(0, nameStart);
     const std::wstring name = path.substr(nameStart, path.size() - nameStart - ModelFileExtension.size());
 
     if (!gLoadData.AccessModel(ToModelSlot(itemType), folder.c_str(), name.c_str()))
     {
-        AddProblem(MakeProblem(ItemModelProblemType::ModelFileMissing, model));
         return false;
     }
     MarkNoneBlendMeshes(itemType, model);
     CheckModel(itemType, model, lookNames);
     return true;
+}
+
+bool OpenModel(int itemType, const ItemModelDefinition& model, const LookNames& lookNames)
+{
+    const LocalItemRow* local = FindLocalItemModel(itemType);
+    if (local != nullptr && !local->modelFile.empty() && local->modelFile != model.file)
+    {
+        if (OpenModelFile(itemType, model, lookNames, local->modelFile))
+        {
+            return true;
+        }
+    }
+    if (OpenModelFile(itemType, model, lookNames, model.file))
+    {
+        return true;
+    }
+    AddProblem(MakeProblem(ItemModelProblemType::ModelFileMissing, model));
+    return false;
 }
 
 // The item type whose slot opened the file of a shared model.

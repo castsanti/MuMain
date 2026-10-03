@@ -15,6 +15,14 @@ mu_add_test(
 )
 
 mu_add_test(
+    NAME test_ozj_jpeg
+    SOURCES
+        test_ozj_jpeg.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Textures/OzjJpeg.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/ModulusCryptor.cpp
+)
+
+mu_add_test(
     NAME test_player_action_align
     SOURCES
         test_player_action_align.cpp

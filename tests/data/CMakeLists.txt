@@ -1,4 +1,11 @@
 mu_add_test(
+    NAME test_local_item_table
+    SOURCES
+        test_local_item_table.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Data/GameData/ItemData/LocalItemTable.cpp
+)
+
+mu_add_test(
     NAME test_local_bmd_scripts
     SOURCES
         test_local_bmd_scripts.cpp

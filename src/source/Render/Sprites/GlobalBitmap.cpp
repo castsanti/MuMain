@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "turbojpeg.h"
 #include "Render/Sprites/GlobalBitmap.h"
+#include "Render/Textures/OzjJpeg.h"
 #include "Core/Platform/PathResolve.h"
 #include "Core/Utilities/Log/MuLogger.h"
 
@@ -789,15 +790,15 @@ bool CGlobalBitmap::OpenJpegTurbo(GLuint uiBitmapIndex, const std::wstring& file
                                        std::istreambuf_iterator<char>());
     compressedFile.close();
 
-    if (jpegBuf.size() <= 24)
+    std::vector<std::uint8_t> jpegBytes;
+    if (!Render::Textures::ReadOzjJpeg(jpegBuf.data(), jpegBuf.size(), jpegBytes))
     {
-        g_ErrorReport.Write(L"OpenJpegTurbo: file too small %ls (%zu bytes)\r\n", filename_ozj.c_str(), jpegBuf.size());
+        g_ErrorReport.Write(L"OpenJpegTurbo: no JPEG in %ls (%zu bytes)\r\n", filename_ozj.c_str(), jpegBuf.size());
         return false;
     }
 
-    // Skip first 24 bytes (OZJ header)
-    const unsigned char* jpegData = jpegBuf.data() + 24;
-    const auto jpegSize = static_cast<unsigned long>(jpegBuf.size() - 24);
+    const unsigned char* jpegData = jpegBytes.data();
+    const auto jpegSize = static_cast<unsigned long>(jpegBytes.size());
 
     int jpegWidth = 0, jpegHeight = 0;
     int jpegSubsamp = TJSAMP_444;

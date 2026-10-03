@@ -7,6 +7,8 @@
 #include "Guild/GuildCache.h"
 #include "Render/Models/ZzzBMD.h"
 #include "Engine/Object/ZzzInfomation.h"
+#include "Data/GameData/ItemData/ItemType.h"
+#include "Data/GameData/ItemData/LocalItemTable.h"
 #include "Engine/Object/ZzzObject.h"
 #include "Engine/Object/ZzzCharacter.h"
 #include "Engine/Object/ZzzInterface.h"
@@ -2376,7 +2378,13 @@ void ReceiveChangePlayer(std::span<const BYTE> ReceiveBuffer)
     CHARACTER* c = &CharactersClient[FindCharacterIndex(Key)];
     OBJECT* o = &c->Object;
 
-    int Type = ((Data->ItemGroup & 0xF) * MAX_ITEM_INDEX) | Data->ItemNumber;
+    const int sectionType = (Data->ItemGroup & 0x0F) * MAX_ITEM_INDEX + Data->ItemNumber;
+    const int packedType = Data->ItemGroup * 256 + Data->ItemNumber;
+    const bool sectionHasSize =
+        Data::Items::IsValidItemType(sectionType) && ItemAttribute != nullptr && ItemAttribute[sectionType].Width > 0;
+    const bool packedHasSize =
+        Data::Items::IsValidItemType(packedType) && ItemAttribute != nullptr && ItemAttribute[packedType].Width > 0;
+    int Type = Data::Items::ChooseEquipmentItemType(Data->ItemGroup, Data->ItemNumber, sectionHasSize, packedHasSize);
     // BYTE Level = Data->Item[1] & 0xf;
     // BYTE Option = Data->Item[3] & 63;
     // BYTE ExtOption = Data->Item[4];
