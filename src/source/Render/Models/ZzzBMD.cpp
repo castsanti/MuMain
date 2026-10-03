@@ -3190,31 +3190,6 @@ bool IsPlayerModelFile(const wchar_t* fileName)
     return _wcsicmp(base, L"player.bmd") == 0;
 }
 
-std::uint32_t MotionCrc(const BMD& model, int action)
-{
-    const int keys = model.Actions[action].NumAnimationKeys;
-    if (keys <= 0)
-    {
-        return 0;
-    }
-    std::uint32_t crc = 0;
-    for (int bone = 0; bone < model.NumBones; ++bone)
-    {
-        if (model.Bones[bone].Dummy || model.Bones[bone].BoneMatrixes == nullptr)
-        {
-            continue;
-        }
-        const BoneMatrix_t& matrix = model.Bones[bone].BoneMatrixes[action];
-        if (matrix.Position == nullptr || matrix.Rotation == nullptr)
-        {
-            continue;
-        }
-        crc = Render::Models::HashPlayerMotion(crc, matrix.Position, sizeof(vec3_t) * static_cast<std::size_t>(keys));
-        crc = Render::Models::HashPlayerMotion(crc, matrix.Rotation, sizeof(vec3_t) * static_cast<std::size_t>(keys));
-    }
-    return crc;
-}
-
 void ApplyActionOrder(BMD& model, const std::vector<int>& order)
 {
     std::vector<Action_t> actions(static_cast<std::size_t>(model.NumActions));
@@ -3350,38 +3325,27 @@ void WriteActionPose(const BMD& model, int action, bool byIndex, float step, std
     }
 }
 
-std::uint32_t PoseCrc(const BMD& model, int action, bool byIndex)
-{
-    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
-    std::int16_t angles[kAngles];
-    WriteActionPose(model, action, byIndex, Render::Models::kPlayerPoseStep, angles);
-    return Render::Models::HashPlayerPose(static_cast<std::uint16_t>(model.Actions[action].NumAnimationKeys),
-                                          static_cast<std::uint8_t>(model.Actions[action].LockPositions), angles,
-                                          kAngles);
-}
-
-std::uint32_t CoarsePoseCrc(const BMD& model, int action, bool byIndex)
-{
-    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
-    std::int16_t angles[kAngles];
-    WriteActionPose(model, action, byIndex, Render::Models::kPlayerCoarsePoseStep, angles);
-    return Render::Models::HashPlayerMotion(0, angles, sizeof(angles));
-}
-
-void MeasureRootMotion(const BMD& model, int action, bool byIndex, float& pathLength, float& maxStep)
+void MeasureRootMotion(const BMD& model, int action, bool byIndex, float& pathLength, float& maxStep, float& meanHeight)
 {
     pathLength = 0.f;
     maxStep = 0.f;
+    meanHeight = 0.f;
     const Bone_t* root = PoseBone(model, 0, byIndex);
     const int keys = model.Actions[action].NumAnimationKeys;
-    if (root == nullptr || root->BoneMatrixes == nullptr || keys < 2 ||
+    if (root == nullptr || root->BoneMatrixes == nullptr || keys <= 0 ||
         root->BoneMatrixes[action].Position == nullptr)
     {
         return;
     }
     const vec3_t* position = root->BoneMatrixes[action].Position;
-    for (int key = 1; key < keys; ++key)
+    float heightSum = 0.f;
+    for (int key = 0; key < keys; ++key)
     {
+        heightSum += position[key][2];
+        if (key == 0)
+        {
+            continue;
+        }
         const float dx = position[key][0] - position[key - 1][0];
         const float dy = position[key][1] - position[key - 1][1];
         const float dz = position[key][2] - position[key - 1][2];
@@ -3392,79 +3356,30 @@ void MeasureRootMotion(const BMD& model, int action, bool byIndex, float& pathLe
             maxStep = step;
         }
     }
-}
-
-struct IdleMotion
-{
-    std::vector<std::int16_t> angles;
-    std::vector<float> pathLength;
-    std::vector<float> maxStep;
-};
-
-IdleMotion MeasureIdleMotion(const BMD& model, bool byIndex)
-{
-    IdleMotion motion;
-    motion.angles.resize(static_cast<std::size_t>(model.NumActions) * Render::Models::kSeason6IdlePoseAngles);
-    motion.pathLength.resize(static_cast<std::size_t>(model.NumActions));
-    motion.maxStep.resize(static_cast<std::size_t>(model.NumActions));
-    for (int action = 0; action < model.NumActions; ++action)
-    {
-        WriteActionPose(model, action, byIndex, Render::Models::kPlayerCoarsePoseStep,
-                        motion.angles.data() + static_cast<std::size_t>(action) * Render::Models::kSeason6IdlePoseAngles);
-        MeasureRootMotion(model, action, byIndex, motion.pathLength[static_cast<std::size_t>(action)],
-                          motion.maxStep[static_cast<std::size_t>(action)]);
-    }
-    return motion;
-}
-
-int KeepStandingIdles(const IdleMotion& motion, int loadedCount, std::vector<int>& season6ToLoaded)
-{
-    return Render::Models::PlaceSeason6IdleClips(motion.angles.data(), motion.pathLength.data(), motion.maxStep.data(),
-                                                 loadedCount, season6ToLoaded.data());
+    meanHeight = heightSum / static_cast<float>(keys);
 }
 
 const wchar_t* MatchPlayerActions(const BMD& model, bool byIndex, std::vector<int>& season6ToLoaded)
 {
-    const IdleMotion idleMotion = MeasureIdleMotion(model, byIndex);
-    std::vector<std::uint32_t> motion(static_cast<std::size_t>(model.NumActions));
-    for (int action = 0; action < model.NumActions; ++action)
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    const int loadedCount = model.NumActions;
+    std::vector<std::int16_t> angles(static_cast<std::size_t>(loadedCount) * static_cast<std::size_t>(kAngles));
+    std::vector<float> pathLength(static_cast<std::size_t>(loadedCount));
+    std::vector<float> meanHeight(static_cast<std::size_t>(loadedCount));
+    for (int action = 0; action < loadedCount; ++action)
     {
-        motion[static_cast<std::size_t>(action)] = MotionCrc(model, action);
+        WriteActionPose(model, action, byIndex, Render::Models::kPlayerCoarsePoseStep,
+                        angles.data() + static_cast<std::size_t>(action) * static_cast<std::size_t>(kAngles));
+        float maxStep = 0.f;
+        MeasureRootMotion(model, action, byIndex, pathLength[static_cast<std::size_t>(action)], maxStep,
+                          meanHeight[static_cast<std::size_t>(action)]);
     }
-    if (Render::Models::MapSeason6PlayerActions(motion.data(), model.NumActions, season6ToLoaded.data()))
-    {
-        KeepStandingIdles(idleMotion, model.NumActions, season6ToLoaded);
-        return L"checksum";
-    }
-
-    for (int action = 0; action < model.NumActions; ++action)
-    {
-        motion[static_cast<std::size_t>(action)] = PoseCrc(model, action, byIndex);
-    }
-    if (Render::Models::MapSeason6PlayerPoses(motion.data(), model.NumActions, season6ToLoaded.data()))
-    {
-        KeepStandingIdles(idleMotion, model.NumActions, season6ToLoaded);
-        return L"pose";
-    }
-
-    for (int action = 0; action < model.NumActions; ++action)
-    {
-        motion[static_cast<std::size_t>(action)] = CoarsePoseCrc(model, action, byIndex);
-    }
-    if (Render::Models::MapSeason6PlayerCoarsePoses(motion.data(), model.NumActions, season6ToLoaded.data()))
-    {
-        KeepStandingIdles(idleMotion, model.NumActions, season6ToLoaded);
-        return L"coarse";
-    }
-
-    const int unique = Render::Models::MapSeason6PlayerUniquePoses(motion.data(), model.NumActions, season6ToLoaded.data());
-    Render::Models::CompleteSeason6ActionMap(season6ToLoaded.data(), model.NumActions);
-    const int idles = KeepStandingIdles(idleMotion, model.NumActions, season6ToLoaded);
-    if (unique == 0 && idles == 0)
+    if (Render::Models::MapSeason6PlayerMotions(angles.data(), pathLength.data(), meanHeight.data(), loadedCount,
+                                               season6ToLoaded.data()) < 0)
     {
         return nullptr;
     }
-    return idles > 0 ? L"idle" : L"unique";
+    return L"motion";
 }
 
 void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
@@ -3481,15 +3396,16 @@ void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
     const int idleSource = matchedBy == nullptr ? 1 : season6ToLoaded[1];
     float idleTravel = 0.f;
     float idleStep = 0.f;
+    float idleHeight = 0.f;
     if (idleSource >= 0 && idleSource < model.NumActions)
     {
-        MeasureRootMotion(model, idleSource, byIndex, idleTravel, idleStep);
+        MeasureRootMotion(model, idleSource, byIndex, idleTravel, idleStep, idleHeight);
     }
     if (matchedBy == nullptr)
     {
         g_ErrorReport.Write(
-            L"[Open2] player.bmd actions=%d bones=%d names=%d align=mismatch idleTravel=%.1f idleStep=%.1f\r\n",
-            model.NumActions, model.NumBones, namedBones, idleTravel, idleStep);
+            L"[Open2] player.bmd actions=%d bones=%d names=%d align=mismatch idleTravel=%.1f idleStep=%.1f idleHeight=%.1f\r\n",
+            model.NumActions, model.NumBones, namedBones, idleTravel, idleStep, idleHeight);
         wprintf(L"[Open2] player.bmd has %d actions and does not match the Season 6 clips\n", model.NumActions);
         return;
     }
@@ -3505,9 +3421,9 @@ void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName)
     const int idleClip = season6ToLoaded[1];
     const int idleKeys = idleSource >= 0 && idleSource < model.NumActions ? model.Actions[idleSource].NumAnimationKeys : 0;
     g_ErrorReport.Write(
-        L"[Open2] player.bmd actions=%d bones=%d names=%d align=%ls idleClip=%d idleKeys=%d idleTravel=%.1f idleStep=%.1f\r\n",
+        L"[Open2] player.bmd actions=%d bones=%d names=%d align=%ls idleClip=%d idleKeys=%d idleTravel=%.1f idleStep=%.1f idleHeight=%.1f\r\n",
         model.NumActions, model.NumBones, namedBones, alreadyAligned ? L"identity" : matchedBy, idleClip, idleKeys,
-        idleTravel, idleStep);
+        idleTravel, idleStep, idleHeight);
     if (alreadyAligned)
     {
         return;

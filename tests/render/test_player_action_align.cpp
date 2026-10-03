@@ -149,3 +149,90 @@ TEST_CASE("a looping walk is not used as the idle clip")
     CHECK(season6ToLoaded[1] == kStandingClip);
     CHECK(season6ToLoaded[40] == kWalkClip);
 }
+
+namespace
+{
+
+float MotionPath(std::uint8_t motionClass)
+{
+    const auto kind = static_cast<Render::Models::PlayerMotionClass>(motionClass);
+    if (kind == Render::Models::PlayerMotionClass::GroundStill || kind == Render::Models::PlayerMotionClass::AirStill)
+    {
+        return 0.f;
+    }
+    return Render::Models::kMotionStillPath + 1.f;
+}
+
+float MotionHeight(std::uint8_t motionClass)
+{
+    const auto kind = static_cast<Render::Models::PlayerMotionClass>(motionClass);
+    if (kind == Render::Models::PlayerMotionClass::AirStill || kind == Render::Models::PlayerMotionClass::AirMove)
+    {
+        return Render::Models::kReferenceGroundHeight + Render::Models::kAirAboveGround + 10.f;
+    }
+    return Render::Models::kReferenceGroundHeight;
+}
+
+void FillReferenceMotions(std::vector<std::int16_t>& angles, std::vector<float>& path, std::vector<float>& height)
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    angles.assign(static_cast<std::size_t>(kActions) * kAngles, 0);
+    path.assign(static_cast<std::size_t>(kActions), 0.f);
+    height.assign(static_cast<std::size_t>(kActions), 0.f);
+    for (int action = 0; action < kActions; ++action)
+    {
+        Render::Models::CopySeason6MotionPose(action, angles.data() + static_cast<std::size_t>(action) * kAngles, kAngles);
+        const std::uint8_t motionClass = Render::Models::Season6MotionClass(action);
+        path[static_cast<std::size_t>(action)] = MotionPath(motionClass);
+        height[static_cast<std::size_t>(action)] = MotionHeight(motionClass);
+    }
+}
+
+} // namespace
+
+TEST_CASE("Season 6 motion classes map each clip onto itself")
+{
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    std::vector<std::int16_t> angles;
+    std::vector<float> path;
+    std::vector<float> height;
+    FillReferenceMotions(angles, path, height);
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerMotions(angles.data(), path.data(), height.data(), kActions,
+                                                   season6ToLoaded.data()) == kActions);
+    for (int action = 0; action < kActions; ++action)
+    {
+        CHECK(season6ToLoaded[static_cast<std::size_t>(action)] == action);
+    }
+}
+
+TEST_CASE("a foot walk stays on the ground and a wing idle stays in the air")
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    constexpr int kActions = Render::Models::kSeason6PlayerActionCount;
+    constexpr int kWingIdle = 11;
+    constexpr int kFootWalk = 15;
+    std::vector<std::int16_t> angles;
+    std::vector<float> path;
+    std::vector<float> height;
+    FillReferenceMotions(angles, path, height);
+
+    for (int sample = 0; sample < kAngles; ++sample)
+    {
+        std::swap(angles[static_cast<std::size_t>(kWingIdle) * kAngles + sample],
+                  angles[static_cast<std::size_t>(kFootWalk) * kAngles + sample]);
+    }
+    std::swap(path[static_cast<std::size_t>(kWingIdle)], path[static_cast<std::size_t>(kFootWalk)]);
+    std::swap(height[static_cast<std::size_t>(kWingIdle)], height[static_cast<std::size_t>(kFootWalk)]);
+
+    std::vector<int> season6ToLoaded(static_cast<std::size_t>(kActions), -1);
+    REQUIRE(Render::Models::MapSeason6PlayerMotions(angles.data(), path.data(), height.data(), kActions,
+                                                   season6ToLoaded.data()) == kActions);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(kFootWalk)] == kWingIdle);
+    CHECK(season6ToLoaded[static_cast<std::size_t>(kWingIdle)] == kFootWalk);
+    CHECK(Render::Models::Season6MotionClass(kFootWalk) ==
+          static_cast<std::uint8_t>(Render::Models::PlayerMotionClass::GroundMove));
+    CHECK(Render::Models::Season6MotionClass(kWingIdle) ==
+          static_cast<std::uint8_t>(Render::Models::PlayerMotionClass::AirMove));
+}

@@ -1,5 +1,6 @@
 #include "Render/Models/PlayerActionAlign.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -13,11 +14,14 @@ namespace
 #include "PlayerMotion.inc"
 #include "PlayerPose.inc"
 #include "PlayerCoarsePose.inc"
+#include "PlayerMotionClass.inc"
 
 static_assert(sizeof(kSeason6PlayerBones) / sizeof(kSeason6PlayerBones[0]) == kSeason6PlayerBoneCount);
 static_assert(sizeof(kSeason6PlayerPose) / sizeof(kSeason6PlayerPose[0]) == kSeason6PlayerActionCount);
 static_assert(sizeof(kSeason6PlayerCoarsePose) / sizeof(kSeason6PlayerCoarsePose[0]) == kSeason6PlayerActionCount);
 static_assert(sizeof(kSeason6IdleAction) / sizeof(kSeason6IdleAction[0]) == kSeason6IdleActionCount);
+static_assert(sizeof(kSeason6MotionClass) / sizeof(kSeason6MotionClass[0]) == kSeason6PlayerActionCount);
+static_assert(sizeof(kSeason6MotionPose) / sizeof(kSeason6MotionPose[0]) == kSeason6PlayerActionCount);
 
 constexpr std::uint32_t kCrcPolynomial = 0xEDB88320u;
 
@@ -263,6 +267,213 @@ int PlayerPoseDistance(const std::int16_t* left, const std::int16_t* right, int 
         distance += std::abs(static_cast<int>(left[index]) - static_cast<int>(right[index]));
     }
     return distance;
+}
+
+std::uint8_t Season6MotionClass(int action)
+{
+    if (action < 0 || action >= kSeason6PlayerActionCount)
+    {
+        return static_cast<std::uint8_t>(PlayerMotionClass::GroundStill);
+    }
+    return kSeason6MotionClass[action];
+}
+
+void CopySeason6MotionPose(int action, std::int16_t* destination, int count)
+{
+    if (destination == nullptr || count != kSeason6IdlePoseAngles || action < 0 || action >= kSeason6PlayerActionCount)
+    {
+        return;
+    }
+    std::memcpy(destination, kSeason6MotionPose[action], sizeof(kSeason6MotionPose[action]));
+}
+
+namespace
+{
+
+std::uint8_t ClassifyLoadedMotion(float pathLength, float meanHeight, float groundHeight)
+{
+    const bool air = meanHeight > groundHeight + kAirAboveGround;
+    const bool still = pathLength <= kMotionStillPath;
+    if (air && still)
+    {
+        return static_cast<std::uint8_t>(PlayerMotionClass::AirStill);
+    }
+    if (air)
+    {
+        return static_cast<std::uint8_t>(PlayerMotionClass::AirMove);
+    }
+    if (still)
+    {
+        return static_cast<std::uint8_t>(PlayerMotionClass::GroundStill);
+    }
+    return static_cast<std::uint8_t>(PlayerMotionClass::GroundMove);
+}
+
+float DetectGroundHeight(const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
+                         int loadedCount)
+{
+    std::int16_t idlePose[kSeason6IdlePoseAngles];
+    CopySeason6IdlePose(0, idlePose, kSeason6IdlePoseAngles);
+    int best = -1;
+    int bestDistance = 0;
+    for (int loaded = 0; loaded < loadedCount; ++loaded)
+    {
+        if (pathLength[loaded] > kMotionStillPath)
+        {
+            continue;
+        }
+        const int distance = PlayerPoseDistance(loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
+                                                idlePose, kSeason6IdlePoseAngles);
+        if (best < 0 || distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = loaded;
+        }
+    }
+    if (best < 0)
+    {
+        return kReferenceGroundHeight;
+    }
+    return meanHeight[best];
+}
+
+struct MotionPair
+{
+    int distance = 0;
+    int action = 0;
+    int loaded = 0;
+};
+
+bool EarlierPair(const MotionPair& left, const MotionPair& right)
+{
+    if (left.distance != right.distance)
+    {
+        return left.distance < right.distance;
+    }
+    if (left.action != right.action)
+    {
+        return left.action < right.action;
+    }
+    return left.loaded < right.loaded;
+}
+
+void AssignSameClass(const std::int16_t* loadedAngles, const std::uint8_t* loadedClass, int loadedCount,
+                     int* season6ToLoaded, std::vector<char>& clipUsed)
+{
+    std::vector<MotionPair> pairs;
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        const std::int16_t* pose = kSeason6MotionPose[action];
+        for (int loaded = 0; loaded < loadedCount; ++loaded)
+        {
+            if (loadedClass[loaded] != kSeason6MotionClass[action])
+            {
+                continue;
+            }
+            MotionPair pair;
+            pair.distance = PlayerPoseDistance(pose, loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
+                                               kSeason6IdlePoseAngles);
+            pair.action = action;
+            pair.loaded = loaded;
+            pairs.push_back(pair);
+        }
+    }
+    std::sort(pairs.begin(), pairs.end(), EarlierPair);
+
+    std::vector<char> actionUsed(static_cast<std::size_t>(kSeason6PlayerActionCount), 0);
+    for (const MotionPair& pair : pairs)
+    {
+        if (actionUsed[static_cast<std::size_t>(pair.action)] != 0 || clipUsed[static_cast<std::size_t>(pair.loaded)] != 0)
+        {
+            continue;
+        }
+        season6ToLoaded[pair.action] = pair.loaded;
+        actionUsed[static_cast<std::size_t>(pair.action)] = 1;
+        clipUsed[static_cast<std::size_t>(pair.loaded)] = 1;
+    }
+}
+
+void AssignLeftoverClips(const std::int16_t* loadedAngles, int loadedCount, int* season6ToLoaded,
+                         std::vector<char>& clipUsed)
+{
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        if (season6ToLoaded[action] >= 0)
+        {
+            continue;
+        }
+        int best = -1;
+        int bestDistance = 0;
+        const std::int16_t* pose = kSeason6MotionPose[action];
+        for (int loaded = 0; loaded < loadedCount; ++loaded)
+        {
+            if (clipUsed[static_cast<std::size_t>(loaded)] != 0)
+            {
+                continue;
+            }
+            const int distance = PlayerPoseDistance(pose, loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
+                                                    kSeason6IdlePoseAngles);
+            if (best < 0 || distance < bestDistance || (distance == bestDistance && loaded < best))
+            {
+                bestDistance = distance;
+                best = loaded;
+            }
+        }
+        if (best < 0)
+        {
+            return;
+        }
+        season6ToLoaded[action] = best;
+        clipUsed[static_cast<std::size_t>(best)] = 1;
+    }
+}
+
+int CountClassMatches(const std::uint8_t* loadedClass, int loadedCount, const int* season6ToLoaded)
+{
+    int matched = 0;
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        const int loaded = season6ToLoaded[action];
+        if (loaded < 0 || loaded >= loadedCount)
+        {
+            continue;
+        }
+        if (loadedClass[loaded] == kSeason6MotionClass[action])
+        {
+            ++matched;
+        }
+    }
+    return matched;
+}
+
+} // namespace
+
+int MapSeason6PlayerMotions(const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
+                            int loadedCount, int* season6ToLoaded)
+{
+    if (loadedAngles == nullptr || pathLength == nullptr || meanHeight == nullptr || season6ToLoaded == nullptr ||
+        loadedCount < kSeason6PlayerActionCount)
+    {
+        return -1;
+    }
+
+    for (int action = 0; action < kSeason6PlayerActionCount; ++action)
+    {
+        season6ToLoaded[action] = -1;
+    }
+
+    const float groundHeight = DetectGroundHeight(loadedAngles, pathLength, meanHeight, loadedCount);
+    std::vector<std::uint8_t> loadedClass(static_cast<std::size_t>(loadedCount));
+    for (int loaded = 0; loaded < loadedCount; ++loaded)
+    {
+        loadedClass[static_cast<std::size_t>(loaded)] =
+            ClassifyLoadedMotion(pathLength[loaded], meanHeight[loaded], groundHeight);
+    }
+
+    std::vector<char> clipUsed(static_cast<std::size_t>(loadedCount), 0);
+    AssignSameClass(loadedAngles, loadedClass.data(), loadedCount, season6ToLoaded, clipUsed);
+    AssignLeftoverClips(loadedAngles, loadedCount, season6ToLoaded, clipUsed);
+    return CountClassMatches(loadedClass.data(), loadedCount, season6ToLoaded);
 }
 
 namespace

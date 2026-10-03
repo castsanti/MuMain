@@ -85,4 +85,32 @@ int PlaceSeason6IdleClips(const std::int16_t* loadedAngles, const float* pathLen
 // Fills -1 entries. A free Season 6 index keeps the clip already stored there.
 void CompleteSeason6ActionMap(int* season6ToLoaded, int loadedCount);
 
+// Root height above the standing idle. Ride and wing clips sit above this.
+constexpr float kAirAboveGround = 12.f;
+// Path length at or under this is a still pose. A hover is longer.
+constexpr float kMotionStillPath = 8.f;
+// Season 6 male idle root height, used when no still clip matches that pose.
+constexpr float kReferenceGroundHeight = 106.9f;
+
+// Ground or air, and still or moving. A foot walk cannot take a ride clip,
+// and a wing idle cannot take a ground stand.
+enum class PlayerMotionClass : std::uint8_t
+{
+    GroundStill = 0,
+    GroundMove = 1,
+    AirStill = 2,
+    AirMove = 3,
+};
+
+std::uint8_t Season6MotionClass(int action);
+
+void CopySeason6MotionPose(int action, std::int16_t* destination, int count);
+
+// Writes the loaded clip for each Season 6 action. Clips are matched inside
+// the same motion class by pose, then leftover actions take the nearest
+// unused clip. Returns how many actions received a clip of their own class,
+// or -1 when the inputs cannot be mapped.
+int MapSeason6PlayerMotions(const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
+                            int loadedCount, int* season6ToLoaded);
+
 }
