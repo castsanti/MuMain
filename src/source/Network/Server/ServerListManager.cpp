@@ -6,6 +6,7 @@
 #include "ServerListManager.h"
 #include "ServerListScript.h"
 #include "I18N/All.h"
+#include "Core/Text/Cp949.h"
 #include "Core/Utilities/Log/MuLogger.h"
 
 #include <cstdint>
@@ -62,42 +63,51 @@ bool ReadServerListBytes(FILE* file, std::vector<std::uint8_t>& bytes, std::stri
     return true;
 }
 
-void CopyGroupName(wchar_t* destination, const std::string& name)
+bool UsesCp949(Network::ServerList::ScriptFormat format)
+{
+    return format == Network::ServerList::ScriptFormat::Season21 ||
+           format == Network::ServerList::ScriptFormat::Season21WithoutIndex;
+}
+
+std::wstring ServerTextToWide(const std::string& text, bool cp949)
+{
+    if (text.empty())
+    {
+        return {};
+    }
+    if (cp949)
+    {
+        return Core::Text::WideFromCp949(text);
+    }
+
+    std::vector<wchar_t> wide(text.size() + 1, L'\0');
+    const int written =
+        CMultiLanguage::ConvertFromUtf8(wide.data(), text.data(), static_cast<int>(text.size()));
+    if (written <= 0)
+    {
+        return {};
+    }
+    return std::wstring(wide.data());
+}
+
+void CopyGroupName(wchar_t* destination, const std::string& name, bool cp949)
 {
     for (int i = 0; i <= SLM_MAX_SERVER_NAME_LENGTH; ++i)
     {
         destination[i] = L'\0';
     }
-    if (name.empty())
+    const std::wstring wide = ServerTextToWide(name, cp949);
+    if (wide.empty())
     {
         return;
     }
-
-    const std::size_t capped = static_cast<std::size_t>(SLM_MAX_SERVER_NAME_LENGTH);
-    const int sourceBytes = static_cast<int>(name.size() < capped ? name.size() : capped);
-    CMultiLanguage::ConvertFromUtf8(destination, name.data(), sourceBytes);
-    destination[SLM_MAX_SERVER_NAME_LENGTH] = L'\0';
-}
-
-std::wstring DescriptionToWide(const std::string& description)
-{
-    if (description.empty())
+    const std::size_t count = wide.size() < static_cast<std::size_t>(SLM_MAX_SERVER_NAME_LENGTH)
+                                  ? wide.size()
+                                  : static_cast<std::size_t>(SLM_MAX_SERVER_NAME_LENGTH);
+    for (std::size_t i = 0; i < count; ++i)
     {
-        return {};
+        destination[i] = wide[i];
     }
-
-    std::vector<wchar_t> wide(description.size() + 1, L'\0');
-    const int written = CMultiLanguage::ConvertFromUtf8(wide.data(), description.data(),
-                                                         static_cast<int>(description.size()));
-    if (written <= 0)
-    {
-        return {};
-    }
-    if (static_cast<std::size_t>(written) < wide.size())
-    {
-        wide[static_cast<std::size_t>(written)] = L'\0';
-    }
-    return std::wstring(wide.data());
 }
 
 void StoreServerGroups(ServerListScriptMap& groups, const Network::ServerList::ScriptDocument& document)
@@ -106,14 +116,15 @@ void StoreServerGroups(ServerListScriptMap& groups, const Network::ServerList::S
     for (const Network::ServerList::ScriptRecord& record : document.records)
     {
         SServerGroupInfo info{};
-        CopyGroupName(info.m_szName, record.name);
+        const bool cp949 = UsesCp949(document.format);
+        CopyGroupName(info.m_szName, record.name, cp949);
         info.m_byPos = record.position;
         info.m_bySequence = record.sequence;
         for (int i = 0; i < SLM_MAX_SERVER_COUNT; ++i)
         {
             info.m_abyNonPVP[i] = record.nonPvp[static_cast<std::size_t>(i)];
         }
-        info.m_strDescript = DescriptionToWide(record.description);
+        info.m_strDescript = ServerTextToWide(record.description, cp949);
         groups.insert(std::make_pair(record.index, info));
     }
 }
