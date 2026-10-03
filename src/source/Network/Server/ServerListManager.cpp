@@ -4,7 +4,121 @@
 
 #include "stdafx.h"
 #include "ServerListManager.h"
+#include "ServerListScript.h"
 #include "I18N/All.h"
+#include "Core/Utilities/Log/MuLogger.h"
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace
+{
+
+static_assert(Network::ServerList::kServerNameBytes == SLM_MAX_SERVER_NAME_LENGTH);
+static_assert(Network::ServerList::kSeason6NonPvpCount == SLM_MAX_SERVER_COUNT);
+
+void ReportMissingServerList()
+{
+    wchar_t szMessage[256];
+    ::mu_swprintf(szMessage, L"Data\\Local\\ServerList.bmd file not found.\r\n");
+    g_ErrorReport.Write(szMessage);
+    ::MessageBox(g_hWnd, szMessage, NULL, MB_OK);
+    ::PostMessage(g_hWnd, WM_DESTROY, 0, 0);
+}
+
+bool ReadServerListBytes(FILE* file, std::vector<std::uint8_t>& bytes, std::string& error)
+{
+    if (std::fseek(file, 0, SEEK_END) != 0)
+    {
+        error = "could not seek ServerList.bmd";
+        return false;
+    }
+
+    const long fileSize = std::ftell(file);
+    if (fileSize < 0)
+    {
+        error = "could not read ServerList.bmd size";
+        return false;
+    }
+    if (std::fseek(file, 0, SEEK_SET) != 0)
+    {
+        error = "could not rewind ServerList.bmd";
+        return false;
+    }
+
+    bytes.resize(static_cast<std::size_t>(fileSize));
+    if (fileSize == 0)
+    {
+        return true;
+    }
+
+    const std::size_t readCount = std::fread(bytes.data(), 1, bytes.size(), file);
+    if (readCount != bytes.size())
+    {
+        error = "could not read ServerList.bmd";
+        return false;
+    }
+    return true;
+}
+
+void CopyGroupName(wchar_t* destination, const std::string& name)
+{
+    for (int i = 0; i <= SLM_MAX_SERVER_NAME_LENGTH; ++i)
+    {
+        destination[i] = L'\0';
+    }
+    if (name.empty())
+    {
+        return;
+    }
+
+    const std::size_t capped = static_cast<std::size_t>(SLM_MAX_SERVER_NAME_LENGTH);
+    const int sourceBytes = static_cast<int>(name.size() < capped ? name.size() : capped);
+    CMultiLanguage::ConvertFromUtf8(destination, name.data(), sourceBytes);
+    destination[SLM_MAX_SERVER_NAME_LENGTH] = L'\0';
+}
+
+std::wstring DescriptionToWide(const std::string& description)
+{
+    if (description.empty())
+    {
+        return {};
+    }
+
+    std::vector<wchar_t> wide(description.size() + 1, L'\0');
+    const int written = CMultiLanguage::ConvertFromUtf8(wide.data(), description.data(),
+                                                         static_cast<int>(description.size()));
+    if (written <= 0)
+    {
+        return {};
+    }
+    if (static_cast<std::size_t>(written) < wide.size())
+    {
+        wide[static_cast<std::size_t>(written)] = L'\0';
+    }
+    return std::wstring(wide.data());
+}
+
+void StoreServerGroups(ServerListScriptMap& groups, const Network::ServerList::ScriptDocument& document)
+{
+    groups.clear();
+    for (const Network::ServerList::ScriptRecord& record : document.records)
+    {
+        SServerGroupInfo info{};
+        CopyGroupName(info.m_szName, record.name);
+        info.m_byPos = record.position;
+        info.m_bySequence = record.sequence;
+        for (int i = 0; i < SLM_MAX_SERVER_COUNT; ++i)
+        {
+            info.m_abyNonPVP[i] = record.nonPvp[static_cast<std::size_t>(i)];
+        }
+        info.m_strDescript = DescriptionToWide(record.description);
+        groups.insert(std::make_pair(record.index, info));
+    }
+}
+
+} // namespace
 
 CServerListManager::CServerListManager()
 {
@@ -38,53 +152,34 @@ void CServerListManager::Release()
 
 void CServerListManager::LoadServerListScript()
 {
-    FILE* fp = ::_wfopen(L"Data\\Local\\ServerList.bmd", L"rb");
-
-    if (fp == NULL)
+    FILE* file = ::_wfopen(L"Data\\Local\\ServerList.bmd", L"rb");
+    if (file == NULL)
     {
-        wchar_t szMessage[256];
-        ::mu_swprintf(szMessage, L"Data\\Local\\ServerList.bmd file not found.\r\n");
-        g_ErrorReport.Write(szMessage);
-        ::MessageBox(g_hWnd, szMessage, NULL, MB_OK);
-        ::PostMessage(g_hWnd, WM_DESTROY, 0, 0);
+        ReportMissingServerList();
         return;
     }
 
-#pragma pack(push, 1)
-    typedef struct _SERVER_GROUP_INFO
+    std::vector<std::uint8_t> bytes;
+    std::string readError;
+    const bool read = ReadServerListBytes(file, bytes, readError);
+    std::fclose(file);
+    if (!read)
     {
-        WORD	m_wIndex;
-        char	m_szName[SLM_MAX_SERVER_NAME_LENGTH];
-        BYTE	m_byPos;
-        BYTE	m_bySequence;
-        BYTE	m_abyNonPVP[SLM_MAX_SERVER_COUNT];
-        short	m_nDescriptLen;
-    } SERVER_GROUP_INFO;
-#pragma pack(pop)
-
-    int nSize = sizeof(SERVER_GROUP_INFO);
-    SERVER_GROUP_INFO sServerGroupScript;
-    char szDescript[1024];
-    SServerGroupInfo sServerGroupInfo;
-    int i;
-
-    while (0 != ::fread(&sServerGroupScript, nSize, 1, fp))
-    {
-        BuxConvert((BYTE*)&sServerGroupScript, nSize);
-        ::fread(szDescript, sServerGroupScript.m_nDescriptLen, 1, fp);
-        BuxConvert((BYTE*)szDescript, sServerGroupScript.m_nDescriptLen);
-
-        CMultiLanguage::ConvertFromUtf8(sServerGroupInfo.m_szName, sServerGroupScript.m_szName);
-
-        sServerGroupInfo.m_byPos = sServerGroupScript.m_byPos;
-        sServerGroupInfo.m_bySequence = sServerGroupScript.m_bySequence;
-        for (i = 0; i < SLM_MAX_SERVER_COUNT; ++i)
-            sServerGroupInfo.m_abyNonPVP[i] = sServerGroupScript.m_abyNonPVP[i];
-
-        m_mapServerListScript.insert(std::make_pair(sServerGroupScript.m_wIndex, sServerGroupInfo));
+        MU_LOG_ERROR(mu::log::Get("network"), "{}", readError);
+        return;
     }
 
-    ::fclose(fp);
+    const Network::ServerList::ScriptDocument document = Network::ServerList::ParseScript(bytes.data(), bytes.size());
+    if (document.format == Network::ServerList::ScriptFormat::None)
+    {
+        MU_LOG_ERROR(mu::log::Get("network"), "ServerList.bmd ({} bytes) was not loaded: {}", bytes.size(),
+                     document.error);
+        return;
+    }
+
+    StoreServerGroups(m_mapServerListScript, document);
+    MU_LOG_INFO(mu::log::Get("network"), "Loaded {} server groups from ServerList.bmd ({})", document.records.size(),
+                Network::ServerList::ScriptFormatName(document.format));
 }
 
 const SServerGroupInfo* CServerListManager::GetServerGroupInfoInScript(WORD wServerGroupIndex)
@@ -140,7 +235,8 @@ bool CServerListManager::MakeServerGroup(IN int iServerGroupIndex, OUT CServerGr
         return false;
 
     ::wcscpy(pServerGroup->m_szName, pServerGroupInfo->m_szName);
-    ::wcscpy(pServerGroup->m_szDescription, pServerGroupInfo->m_strDescript.c_str());
+    Network::ServerList::CopyBoundedWide(pServerGroup->m_szDescription, MAX_TEXT_LENGTH,
+                                         pServerGroupInfo->m_strDescript);
     pServerGroup->m_iSequence = (int)pServerGroupInfo->m_bySequence;
     pServerGroup->m_iWidthPos = (int)pServerGroupInfo->m_byPos;
     pServerGroup->m_iServerIndex = iServerGroupIndex;
