@@ -9,6 +9,8 @@ namespace
 
 constexpr std::size_t kClassicHeaderBytes = 24;
 constexpr std::size_t kScanStart = 16;
+constexpr std::uint8_t kJpegPrefix = 0xFF;
+constexpr std::uint8_t kJpegSoi = 0xD8;
 
 bool IsJpegMarker(std::uint8_t marker)
 {
@@ -16,10 +18,15 @@ bool IsJpegMarker(std::uint8_t marker)
            marker == 0xE1 || marker == 0xE2 || marker == 0xFE;
 }
 
+bool StartsWithJpegSoi(const std::uint8_t* data, std::size_t size, std::size_t offset)
+{
+    return offset + 3 <= size && data[offset] == kJpegPrefix && data[offset + 1] == kJpegSoi &&
+           data[offset + 2] == kJpegPrefix;
+}
+
 bool IsJpegStart(const std::uint8_t* data, std::size_t size, std::size_t offset)
 {
-    return offset + 4 <= size && data[offset] == 0xFF && data[offset + 1] == 0xD8 && data[offset + 2] == 0xFF &&
-           IsJpegMarker(data[offset + 3]);
+    return StartsWithJpegSoi(data, size, offset) && offset + 4 <= size && IsJpegMarker(data[offset + 3]);
 }
 
 std::size_t FindJpegStart(const std::uint8_t* data, std::size_t size)
@@ -43,15 +50,23 @@ std::size_t FindJpegStart(const std::uint8_t* data, std::size_t size)
     return size;
 }
 
-bool CopyJpeg(const std::uint8_t* data, std::size_t size, std::vector<std::uint8_t>& jpeg)
+bool CopyFrom(const std::uint8_t* data, std::size_t size, std::size_t offset, std::vector<std::uint8_t>& jpeg)
 {
-    const std::size_t offset = FindJpegStart(data, size);
     if (offset >= size)
     {
         return false;
     }
     jpeg.assign(data + offset, data + size);
     return true;
+}
+
+bool ExtractJpeg(const std::uint8_t* data, std::size_t size, std::vector<std::uint8_t>& jpeg)
+{
+    if (StartsWithJpegSoi(data, size, kClassicHeaderBytes))
+    {
+        return CopyFrom(data, size, kClassicHeaderBytes, jpeg);
+    }
+    return CopyFrom(data, size, FindJpegStart(data, size), jpeg);
 }
 
 } // namespace
@@ -63,7 +78,7 @@ bool ReadOzjJpeg(const std::uint8_t* file, std::size_t size, std::vector<std::ui
     {
         return false;
     }
-    if (CopyJpeg(file, size, jpeg))
+    if (ExtractJpeg(file, size, jpeg))
     {
         return true;
     }
@@ -73,7 +88,7 @@ bool ReadOzjJpeg(const std::uint8_t* file, std::size_t size, std::vector<std::ui
     {
         return false;
     }
-    return CopyJpeg(plain.data(), plain.size(), jpeg);
+    return ExtractJpeg(plain.data(), plain.size(), jpeg);
 }
 
 } // namespace Render::Textures
