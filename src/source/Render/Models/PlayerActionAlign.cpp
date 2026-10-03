@@ -16,6 +16,7 @@ namespace
 #include "PlayerCoarsePose.inc"
 #include "PlayerMotionClass.inc"
 #include "PlayerActionNames.inc"
+#include "PlayerActionKeys.inc"
 
 static_assert(sizeof(kSeason6PlayerBones) / sizeof(kSeason6PlayerBones[0]) == kSeason6PlayerBoneCount);
 static_assert(sizeof(kSeason6PlayerPose) / sizeof(kSeason6PlayerPose[0]) == kSeason6PlayerActionCount);
@@ -24,6 +25,8 @@ static_assert(sizeof(kSeason6IdleAction) / sizeof(kSeason6IdleAction[0]) == kSea
 static_assert(sizeof(kSeason6MotionClass) / sizeof(kSeason6MotionClass[0]) == kSeason6PlayerActionCount);
 static_assert(sizeof(kSeason6MotionPose) / sizeof(kSeason6MotionPose[0]) == kSeason6PlayerActionCount);
 static_assert(sizeof(kSeason6ActionName) / sizeof(kSeason6ActionName[0]) == kSeason6PlayerActionCount);
+static_assert(sizeof(kSeason6ActionKeys) / sizeof(kSeason6ActionKeys[0]) == kSeason6PlayerActionCount);
+static_assert(sizeof(kSeason6ActionLock) / sizeof(kSeason6ActionLock[0]) == kSeason6PlayerActionCount);
 
 constexpr std::uint32_t kCrcPolynomial = 0xEDB88320u;
 
@@ -487,6 +490,24 @@ const char* Season6ActionName(int action)
     return kSeason6ActionName[action];
 }
 
+void CopySeason6ActionKeys(std::uint16_t* destination, int count)
+{
+    if (destination == nullptr || count != kSeason6PlayerActionCount)
+    {
+        return;
+    }
+    std::memcpy(destination, kSeason6ActionKeys, sizeof(kSeason6ActionKeys));
+}
+
+void CopySeason6ActionLocks(std::uint8_t* destination, int count)
+{
+    if (destination == nullptr || count != kSeason6PlayerActionCount)
+    {
+        return;
+    }
+    std::memcpy(destination, kSeason6ActionLock, sizeof(kSeason6ActionLock));
+}
+
 namespace
 {
 
@@ -610,6 +631,156 @@ bool MapSeason6PlayerActionList(const std::int16_t* loadedAngles, int loadedCoun
         season6ToLoaded[action] = action < kSeason6DefenseAction ? action : action + shift;
     }
     return true;
+}
+
+namespace
+{
+
+// A one-frame change is cheaper than skipping the clip. A different motion
+// class costs more than a small pose miss and less than the wrong clip.
+constexpr int kClipKeyWeight = 40;
+constexpr int kClipLockWeight = 120;
+constexpr int kClipClassWeight = 250;
+constexpr int kClipSkipCost = 8;
+constexpr std::int64_t kClipAlignInfinity = 1000000000;
+
+std::size_t ClipCell(int action, int loaded, int loadedCount)
+{
+    return static_cast<std::size_t>(action) * static_cast<std::size_t>(loadedCount + 1) +
+           static_cast<std::size_t>(loaded);
+}
+
+int ClipMatchCost(int action, int loaded, const std::uint16_t* loadedKeys, const std::uint8_t* loadedLocks,
+                  const std::int16_t* loadedAngles, const std::uint8_t* loadedClass)
+{
+    int cost = 0;
+    if (loadedAngles != nullptr)
+    {
+        cost += PlayerPoseDistance(kSeason6MotionPose[action],
+                                   loadedAngles + static_cast<std::size_t>(loaded) * kSeason6IdlePoseAngles,
+                                   kSeason6IdlePoseAngles);
+    }
+    const int keyDelta =
+        std::abs(static_cast<int>(loadedKeys[loaded]) - static_cast<int>(kSeason6ActionKeys[action]));
+    cost += keyDelta * kClipKeyWeight;
+    if (loadedLocks[loaded] != kSeason6ActionLock[action])
+    {
+        cost += kClipLockWeight;
+    }
+    if (loadedClass != nullptr && loadedClass[loaded] != kSeason6MotionClass[action])
+    {
+        cost += kClipClassWeight;
+    }
+    return cost;
+}
+
+void ClassifyClipMotions(const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
+                         int loadedCount, std::vector<std::uint8_t>& loadedClass)
+{
+    const float groundHeight = DetectGroundHeight(loadedAngles, pathLength, meanHeight, loadedCount);
+    loadedClass.resize(static_cast<std::size_t>(loadedCount));
+    for (int loaded = 0; loaded < loadedCount; ++loaded)
+    {
+        loadedClass[static_cast<std::size_t>(loaded)] =
+            ClassifyLoadedMotion(pathLength[loaded], meanHeight[loaded], groundHeight);
+    }
+}
+
+bool TraceClipOrder(const std::vector<char>& take, int loadedCount, int* season6ToLoaded)
+{
+    int action = kSeason6PlayerActionCount;
+    int loaded = loadedCount;
+    while (action > 0)
+    {
+        if (loaded <= 0)
+        {
+            return false;
+        }
+        if (take[ClipCell(action, loaded, loadedCount)] != 0)
+        {
+            season6ToLoaded[action - 1] = loaded - 1;
+            --action;
+        }
+        --loaded;
+    }
+    return true;
+}
+
+std::int64_t CheaperClipCost(std::int64_t prior, int added)
+{
+    if (prior >= kClipAlignInfinity)
+    {
+        return kClipAlignInfinity;
+    }
+    return prior + added;
+}
+
+bool AlignClipOrder(const std::uint16_t* loadedKeys, const std::uint8_t* loadedLocks,
+                    const std::int16_t* loadedAngles, const std::uint8_t* loadedClass, int loadedCount,
+                    int* season6ToLoaded)
+{
+    const int actionCount = kSeason6PlayerActionCount;
+    const std::size_t cells = static_cast<std::size_t>(actionCount + 1) * static_cast<std::size_t>(loadedCount + 1);
+    std::vector<std::int64_t> cost(cells, kClipAlignInfinity);
+    std::vector<char> take(cells, 0);
+    cost[ClipCell(0, 0, loadedCount)] = 0;
+    for (int loaded = 1; loaded <= loadedCount; ++loaded)
+    {
+        cost[ClipCell(0, loaded, loadedCount)] = cost[ClipCell(0, loaded - 1, loadedCount)] + kClipSkipCost;
+    }
+    for (int action = 1; action <= actionCount; ++action)
+    {
+        for (int loaded = 1; loaded <= loadedCount; ++loaded)
+        {
+            const std::int64_t skipCost =
+                CheaperClipCost(cost[ClipCell(action, loaded - 1, loadedCount)], kClipSkipCost);
+            const int match =
+                ClipMatchCost(action - 1, loaded - 1, loadedKeys, loadedLocks, loadedAngles, loadedClass);
+            const std::int64_t takeCost =
+                CheaperClipCost(cost[ClipCell(action - 1, loaded - 1, loadedCount)], match);
+            if (takeCost < skipCost)
+            {
+                cost[ClipCell(action, loaded, loadedCount)] = takeCost;
+                take[ClipCell(action, loaded, loadedCount)] = 1;
+                continue;
+            }
+            cost[ClipCell(action, loaded, loadedCount)] = skipCost;
+        }
+    }
+    if (cost[ClipCell(actionCount, loadedCount, loadedCount)] >= kClipAlignInfinity)
+    {
+        return false;
+    }
+    return TraceClipOrder(take, loadedCount, season6ToLoaded);
+}
+
+} // namespace
+
+bool MapSeason6PlayerClipOrder(const std::uint16_t* loadedKeys, const std::uint8_t* loadedLocks,
+                               const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
+                               int loadedCount, int* season6ToLoaded)
+{
+    if (loadedKeys == nullptr || loadedLocks == nullptr || season6ToLoaded == nullptr ||
+        loadedCount < kSeason6PlayerActionCount || loadedCount > kMaxSeason21PlayerActions)
+    {
+        return false;
+    }
+    if ((pathLength == nullptr) != (meanHeight == nullptr))
+    {
+        return false;
+    }
+    if (pathLength != nullptr && loadedAngles == nullptr)
+    {
+        return false;
+    }
+    std::vector<std::uint8_t> loadedClass;
+    const std::uint8_t* classes = nullptr;
+    if (pathLength != nullptr)
+    {
+        ClassifyClipMotions(loadedAngles, pathLength, meanHeight, loadedCount, loadedClass);
+        classes = loadedClass.data();
+    }
+    return AlignClipOrder(loadedKeys, loadedLocks, loadedAngles, classes, loadedCount, season6ToLoaded);
 }
 
 namespace

@@ -3433,6 +3433,37 @@ void ReadTrailingActionNames(const unsigned char* data, int offset, int size, in
     }
 }
 
+struct PlayerClipSamples
+{
+    std::vector<std::int16_t> angles;
+    std::vector<std::uint16_t> keys;
+    std::vector<std::uint8_t> locks;
+    std::vector<float> path;
+    std::vector<float> height;
+};
+
+void SamplePlayerClips(const BMD& model, bool byIndex, PlayerClipSamples& samples)
+{
+    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
+    const int loadedCount = model.NumActions;
+    samples.angles.assign(static_cast<std::size_t>(loadedCount) * static_cast<std::size_t>(kAngles), 0);
+    samples.keys.assign(static_cast<std::size_t>(loadedCount), 0);
+    samples.locks.assign(static_cast<std::size_t>(loadedCount), 0);
+    samples.path.assign(static_cast<std::size_t>(loadedCount), 0.f);
+    samples.height.assign(static_cast<std::size_t>(loadedCount), 0.f);
+    for (int action = 0; action < loadedCount; ++action)
+    {
+        WriteActionPose(model, action, byIndex, Render::Models::kPlayerCoarsePoseStep,
+                        samples.angles.data() + static_cast<std::size_t>(action) * static_cast<std::size_t>(kAngles));
+        const short rawKeys = model.Actions[action].NumAnimationKeys;
+        samples.keys[static_cast<std::size_t>(action)] = rawKeys > 0 ? static_cast<std::uint16_t>(rawKeys) : 0;
+        samples.locks[static_cast<std::size_t>(action)] = model.Actions[action].LockPositions ? 1 : 0;
+        float step = 0.f;
+        MeasureRootMotion(model, action, byIndex, samples.path[static_cast<std::size_t>(action)], step,
+                          samples.height[static_cast<std::size_t>(action)]);
+    }
+}
+
 const wchar_t* MatchPlayerActions(const BMD& model, bool byIndex, const std::vector<std::string>& actionNames,
                                   std::vector<int>& season6ToLoaded)
 {
@@ -3450,24 +3481,20 @@ const wchar_t* MatchPlayerActions(const BMD& model, bool byIndex, const std::vec
         }
     }
 
-    constexpr int kAngles = Render::Models::kSeason6IdlePoseAngles;
     const int loadedCount = model.NumActions;
-    std::vector<std::int16_t> angles(static_cast<std::size_t>(loadedCount) * static_cast<std::size_t>(kAngles));
-    for (int action = 0; action < loadedCount; ++action)
-    {
-        WriteActionPose(model, action, byIndex, Render::Models::kPlayerCoarsePoseStep,
-                        angles.data() + static_cast<std::size_t>(action) * static_cast<std::size_t>(kAngles));
-    }
-    if (!Render::Models::MapSeason6PlayerActionList(angles.data(), loadedCount, season6ToLoaded.data()))
+    if (loadedCount > Render::Models::kMaxSeason21PlayerActions)
     {
         return nullptr;
     }
-    if (season6ToLoaded[static_cast<std::size_t>(Render::Models::kSeason6DefenseAction)] !=
-        Render::Models::kSeason6DefenseAction)
+    PlayerClipSamples samples;
+    SamplePlayerClips(model, byIndex, samples);
+    if (!Render::Models::MapSeason6PlayerClipOrder(samples.keys.data(), samples.locks.data(), samples.angles.data(),
+                                                  samples.path.data(), samples.height.data(), loadedCount,
+                                                  season6ToLoaded.data()))
     {
-        return L"riding";
+        return nullptr;
     }
-    return L"list";
+    return L"order";
 }
 
 void AlignSeason21PlayerActions(BMD& model, const wchar_t* modelFileName, const std::vector<std::string>& actionNames)

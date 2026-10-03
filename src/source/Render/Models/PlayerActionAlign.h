@@ -114,8 +114,8 @@ int MapSeason6PlayerMotions(const std::int16_t* loadedAngles, const float* pathL
                             int loadedCount, int* season6ToLoaded);
 
 // PLAYER_DEFENSE1. Later Main builds insert the six riding-skill clips
-// immediately before this action. Walk, fly, wing idle, mount, and the
-// attacks before the emotes stay at the Season 6 index.
+// immediately before this action. Clips inserted earlier move walk, wing
+// idle, mount, and attack by the same amount.
 constexpr int kSeason6AttackEndAction = 74;
 constexpr int kSeason6DefenseAction = 186;
 constexpr int kSeason6DieAction = 231;
@@ -132,7 +132,25 @@ int MapSeason6PlayerActionsByNames(const char* const* loadedNames, int loadedCou
 // Places every Season 6 action from the Main action list. When the file
 // contains the six riding-skill clips, emotes and later actions move forward
 // by that many slots. Walk, fly, wing idle, mount, and earlier attacks do not.
-// Returns false when the file is too short for that list.
+// The loader uses MapSeason6PlayerClipOrder, so inserts before those clips
+// move them too. Returns false when the file is too short for that list.
 bool MapSeason6PlayerActionList(const std::int16_t* loadedAngles, int loadedCount, int* season6ToLoaded);
+
+// Largest player.bmd action count the order aligner will scan.
+constexpr int kMaxSeason21PlayerActions = 4096;
+
+void CopySeason6ActionKeys(std::uint16_t* destination, int count);
+
+void CopySeason6ActionLocks(std::uint8_t* destination, int count);
+
+// Season 21 keeps older clips in their relative order and inserts new ones.
+// Walk, wing idle, mount, and attack move forward by the clips inserted
+// before them. A file already in Season 6 order stays on those indices.
+// loadedAngles may be null. pathLength and meanHeight are both null or both set.
+// Returns false when the file is shorter than the Season 6 list or longer
+// than kMaxSeason21PlayerActions.
+bool MapSeason6PlayerClipOrder(const std::uint16_t* loadedKeys, const std::uint8_t* loadedLocks,
+                               const std::int16_t* loadedAngles, const float* pathLength, const float* meanHeight,
+                               int loadedCount, int* season6ToLoaded);
 
 }
