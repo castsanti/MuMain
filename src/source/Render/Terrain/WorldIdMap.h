@@ -19,9 +19,8 @@ struct TerrainWorldResolution
     int world = -1;
 };
 
-// Season 21 map and attribute ids are not client world indexes. The table in
-// WorldIdMap.cpp is the only accepted translation. Season 6 ids are the world
-// index and are not listed there.
+// After a Season 21 decrypt, the embedded id must be the client world index or a
+// row in WorldIdMap.cpp. Season 6 ids are the world index and are not listed.
 int ClientWorldForSeason21Id(TerrainIdKind kind, int embeddedId);
 
 TerrainWorldResolution ResolveTerrainWorld(bool season21, TerrainIdKind kind, int embeddedId, int expectedWorld);

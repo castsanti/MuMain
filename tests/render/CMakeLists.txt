@@ -11,6 +11,7 @@ mu_add_test(
         test_terrain_container.cpp
         ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/TerrainContainer.cpp
         ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/WorldIdMap.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/ModulusCryptor.cpp
 )
 
 mu_add_test(

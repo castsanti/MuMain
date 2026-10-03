@@ -12,16 +12,10 @@ struct Season21TerrainWorld
     int attributeId;
 };
 
-// Embedded payload ids read from Season 21 EncTerrain files.
-// Checked-in Data/World*/EncTerrain*.map files are Season 6: the decrypted id
-// byte already equals the WorldN index, so they are not rows in this table.
-// World34's Season 21 overlay (play log) is map id 167 and attribute id 58.
-constexpr Season21TerrainWorld kSeason21TerrainWorlds[] = {
-    {34, 167, 58},
-};
-
-constexpr int kSeason21TerrainWorldCount =
-    static_cast<int>(sizeof(kSeason21TerrainWorlds) / sizeof(kSeason21TerrainWorlds[0]));
+// Ids that are not the client world index. 167 and 58 are not listed: those bytes
+// came from the Season 6 map cipher on a ModulusCryptor payload and are not worlds.
+constexpr int kSeason21TerrainWorldCount = 0;
+constexpr Season21TerrainWorld kSeason21TerrainWorlds[1] = {};
 
 constexpr bool Season21TerrainIdsAreUnique()
 {
@@ -42,9 +36,6 @@ constexpr bool Season21TerrainIdsAreUnique()
 }
 
 static_assert(Season21TerrainIdsAreUnique());
-static_assert(kSeason21TerrainWorlds[0].clientWorld == 34);
-static_assert(kSeason21TerrainWorlds[0].mapId == 167);
-static_assert(kSeason21TerrainWorlds[0].attributeId == 58);
 
 int IdForKind(const Season21TerrainWorld& entry, TerrainIdKind kind)
 {
@@ -59,8 +50,9 @@ int IdForKind(const Season21TerrainWorld& entry, TerrainIdKind kind)
 
 int ClientWorldForSeason21Id(TerrainIdKind kind, int embeddedId)
 {
-    for (const Season21TerrainWorld& entry : kSeason21TerrainWorlds)
+    for (int i = 0; i < kSeason21TerrainWorldCount; ++i)
     {
+        const Season21TerrainWorld& entry = kSeason21TerrainWorlds[i];
         if (IdForKind(entry, kind) == embeddedId)
         {
             return entry.clientWorld;
@@ -78,13 +70,21 @@ TerrainWorldResolution ResolveTerrainWorld(bool season21, TerrainIdKind kind, in
     }
 
     const int mapped = ClientWorldForSeason21Id(kind, embeddedId);
-    if (mapped >= 0 && (expectedWorld < 0 || mapped == expectedWorld))
+    if (mapped >= 0)
     {
-        return TerrainWorldResolution{true, mapped};
+        if (expectedWorld < 0 || mapped == expectedWorld)
+        {
+            return TerrainWorldResolution{true, mapped};
+        }
+        const int reported = embeddedId == expectedWorld ? kTerrainWorldRejected : embeddedId;
+        return TerrainWorldResolution{false, reported};
     }
 
-    const int reported = embeddedId == expectedWorld ? kTerrainWorldRejected : embeddedId;
-    return TerrainWorldResolution{false, reported};
+    if (expectedWorld < 0 || embeddedId == expectedWorld)
+    {
+        return TerrainWorldResolution{true, embeddedId};
+    }
+    return TerrainWorldResolution{false, embeddedId};
 }
 
 } // namespace Render::Terrain

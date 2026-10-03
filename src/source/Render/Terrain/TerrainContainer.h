@@ -13,14 +13,20 @@ constexpr int kTerrainCells = kTerrainGrid * kTerrainGrid;
 
 // Season 6 EncTerrain.map ciphertext is the plain grid: version, map number, two
 // layers, and one alpha byte per cell. EncTerrain.att is that grid as bytes or
-// words plus a 4-byte header. Season 21 writes the same ciphertext after a short
-// plaintext header whose first bytes are "MAP\x01", "ATT\x01", or "OBJ\x01".
-// World34's files are 38 bytes longer than those Season 6 blobs.
+// words plus a 4-byte header, map-cipher then Bux. EncTerrain.obj is the map
+// cipher of version, map number, count, and fixed-size records. Version 0
+// records are 30 bytes and the file size is exactly 4 + count * 30.
+//
+// Season 21 MAP\x01 and ATT\x01 are a 4-byte magic plus a ModulusCryptor blob.
+// The plaintext is the Season 6 grid (attributes are still Bux-masked). Running
+// the Season 6 map cipher on that blob is uniform tile noise, not a map.
+// A Season 21 layer is rejected when it uses more than this many distinct tile
+// ids, which a real map does not and a failed decrypt does.
 constexpr int kMapPayloadBytes = 2 + (kTerrainCells * 3);
 constexpr int kAttributeBytePayloadBytes = 4 + kTerrainCells;
 constexpr int kAttributeWordPayloadBytes = 4 + (kTerrainCells * 2);
-constexpr int kSeason21HeaderBytes = 38;
 constexpr int kObjectRecordBytes = 30;
+constexpr int kMaxMapTileIds = 128;
 
 enum class TerrainFileKind
 {
