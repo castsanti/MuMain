@@ -74,11 +74,11 @@ public:
     int GetTexID() { return m_nTexID; };
     int GetTexWidth()
     {
-        return -1 < m_nTexID ? (int)m_pTexture->Width : 0;
+        return m_pTexture != nullptr ? (int)m_pTexture->Width : 0;
     }
     int GetTexHeight()
     {
-        return -1 < m_nTexID ? (int)m_pTexture->Height : 0;
+        return m_pTexture != nullptr ? (int)m_pTexture->Height : 0;
     }
 
     float GetScaleX() { return m_fScaleX; }
