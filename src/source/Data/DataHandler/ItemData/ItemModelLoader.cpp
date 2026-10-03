@@ -3,6 +3,7 @@
 #include "ItemModelLoader.h"
 #include "ItemModelProblem.h"
 
+#include "Core/Globals/_TextureIndex.h"
 #include "Core/Globals/_enum.h"
 #include "Core/Text/Utf8.h"
 #include "Core/Utilities/Log/MuLogger.h"
@@ -11,8 +12,13 @@
 #include "Data/GameData/ItemData/ItemModelDatabase.h"
 #include "Data/GameData/ItemData/ItemModelGlowJson.h"
 #include "Data/GameData/ItemData/ItemModelSlots.h"
+#include "Data/GameData/ItemData/ItemTextureFiles.h"
+#include "Data/GameData/ItemData/ItemType.h"
 #include "Data/GameData/ItemData/LocalItemTable.h"
 #include "Render/Models/ZzzBMD.h"
+#include "Render/Sprites/GlobalBitmap.h"
+
+#include <cctype>
 
 #include <algorithm>
 #include <map>
@@ -35,6 +41,9 @@ constexpr const char* LoggerName = "data";
 
 // The problems of OpenModels and OpenTextures, until TakeProblemMessage.
 std::vector<ItemModelProblem> g_problems;
+
+bool MeshLacksTexture(GLuint index);
+void AssignJewelStemIcon(int itemType, const ItemModelDefinition& model);
 
 std::wstring ToLoaderPath(const std::string& path)
 {
@@ -156,6 +165,12 @@ bool OpenModel(int itemType, const ItemModelDefinition& model, const LookNames& 
     {
         return true;
     }
+    const LocalItemRow* local = FindLocalItemModel(itemType);
+    if (local != nullptr && !local->modelFile.empty() && local->modelFile != model.file &&
+        OpenModelFile(itemType, model, lookNames, local->modelFile))
+    {
+        return true;
+    }
     AddProblem(MakeProblem(ItemModelProblemType::ModelFileMissing, model));
     return false;
 }
@@ -216,10 +231,72 @@ void OpenModelTextures(int itemType, const ItemModelDefinition& model)
     }
 
     std::vector<TextureProblem> textureProblems;
-    gLoadData.OpenTexture(ToModelSlot(itemType), folders, textureProblems);
+    const int slot = ToModelSlot(itemType);
+    gLoadData.OpenTexture(slot, folders, textureProblems);
+    AssignJewelStemIcon(itemType, model);
+    const BMD& opened = Models[slot];
     for (const TextureProblem& textureProblem : textureProblems)
     {
+        if (opened.IndexTexture != nullptr && textureProblem.mesh >= 0 && textureProblem.mesh < opened.NumMeshs &&
+            !MeshLacksTexture(opened.IndexTexture[textureProblem.mesh]))
+        {
+            continue;
+        }
         AddTextureProblem(model, textureProblem);
+    }
+}
+
+bool MeshLacksTexture(GLuint index)
+{
+    return index == 0 || index == static_cast<GLuint>(BITMAP_UNKNOWN);
+}
+
+bool IsJewelModelFile(std::string_view modelFile)
+{
+    const std::size_t slash = modelFile.find_last_of("/\\");
+    std::string name(modelFile.substr(slash == std::string_view::npos ? 0 : slash + 1));
+    for (char& character : name)
+    {
+        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    }
+    return name.rfind("jewel", 0) == 0 || name == "suho.bmd" || name == "jos.bmd";
+}
+
+// Season 21 jewel meshes name a container the loader used to skip, so the
+// slot stays blank. The icon is the model stem: Jewel01.bmd -> Jewel01.OZJ.
+// Shared jewel models are opened by an earlier item group, so the file name
+// is checked as well as the potion section.
+void AssignJewelStemIcon(int itemType, const ItemModelDefinition& model)
+{
+    if (GetItemGroup(itemType) != ITEM_GROUP_POTION && !IsJewelModelFile(model.file))
+    {
+        return;
+    }
+    BMD& bmd = Models[ToModelSlot(itemType)];
+    if (bmd.NumMeshs <= 0 || bmd.IndexTexture == nullptr || bmd.SharesData())
+    {
+        return;
+    }
+    for (int mesh = 0; mesh < bmd.NumMeshs; ++mesh)
+    {
+        if (!MeshLacksTexture(bmd.IndexTexture[mesh]))
+        {
+            return;
+        }
+    }
+    const std::optional<std::string> stored = ModelStemOzjPath(model.file);
+    if (!stored.has_value())
+    {
+        return;
+    }
+    const GLuint loaded = Bitmaps.LoadImage(ToLoaderPath(*stored));
+    if (loaded == static_cast<GLuint>(BITMAP_UNKNOWN))
+    {
+        return;
+    }
+    for (int mesh = 0; mesh < bmd.NumMeshs; ++mesh)
+    {
+        bmd.IndexTexture[mesh] = loaded;
     }
 }
 

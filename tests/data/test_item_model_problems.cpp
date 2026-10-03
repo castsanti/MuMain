@@ -89,6 +89,12 @@ TEST_CASE("The game reads .jpg and .tga textures from their encrypted copies [da
     CHECK(GetStoredTextureFileName("Sword01.jpg") == "Sword01.OZJ");
     CHECK(GetStoredTextureFileName("hair.TGA") == "hair.OZT");
     CHECK(GetStoredTextureFileName("level.2.jpg") == "level.2.OZJ");
+    CHECK(GetStoredTextureFileName("Jewel01.ozj") == "Jewel01.OZJ");
+    CHECK(GetStoredTextureFileName("suho.OZT") == "suho.OZT");
+    CHECK(ModelStemOzjPath("Data/Item/Jewel01.bmd") == "Data/Item/Jewel01.OZJ");
+    CHECK(ModelStemOzjPath("Data/Item/jewel22.bmd") == "Data/Item/jewel22.OZJ");
+    CHECK(ModelStemOzjPath("Data/Item/suho.BMD") == "Data/Item/suho.OZJ");
+    CHECK_FALSE(ModelStemOzjPath("Data/Item/Jewel01.jpg").has_value());
     CHECK_FALSE(GetStoredTextureFileName("Sword01.bmp").has_value());
     CHECK_FALSE(GetStoredTextureFileName("Sword01.jpeg").has_value());
     CHECK_FALSE(GetStoredTextureFileName("Sword01").has_value());
