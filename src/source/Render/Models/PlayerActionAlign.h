@@ -16,13 +16,24 @@ constexpr int kSeason6PlayerBoneCount = 50;
 
 // First and last key of each of those bones, in radians, divided by this.
 constexpr float kPlayerPoseStep = 0.1f;
+constexpr float kPlayerCoarsePoseStep = 0.5f;
 constexpr int kPlayerPoseSamples = 2;
+
+// Unarmed idles used on character select, plus the Rage Fighter idle.
+// A re-saved player.bmd can fail the full-sequence match and still be fixed
+// by placing these clips.
+constexpr int kSeason6IdleActionCount = 4;
+constexpr int kSeason6IdlePoseAngles = kSeason6PlayerBoneCount * kPlayerPoseSamples * 3;
+constexpr int kIdlePoseDistanceLimit = 80;
+constexpr float kIdleTravelLimit = 8.f;
 
 std::uint32_t HashPlayerMotion(std::uint32_t crc, const void* bytes, std::size_t size);
 
 // Nearest step, halfway away from zero. Shared by the embedded table and the
 // loader so a re-saved clip still lands on the same pose.
 std::int16_t QuantizePlayerAngle(float radians);
+
+std::int16_t QuantizePlayerAngleAt(float radians, float step);
 
 // keys, lock, then kSeason6PlayerBoneCount * kPlayerPoseSamples * 3 angles
 // (first key, then last key). A missing bone is 0x7FFF per component.
@@ -41,5 +52,31 @@ bool MapSeason6PlayerActions(const std::uint32_t* loadedMotion, int loadedCount,
 // Same match on the quantized pose of each clip, for a player.bmd whose bone
 // bytes were re-saved and no longer share the Season 6 checksum.
 bool MapSeason6PlayerPoses(const std::uint32_t* loadedPose, int loadedCount, int* season6ToLoaded);
+
+void CopySeason6PlayerCoarsePose(std::uint32_t* destination, int count);
+
+// The 0.5-radian pose, without the key count. A re-export that changes the
+// key count or nudges a bone still matches.
+bool MapSeason6PlayerCoarsePoses(const std::uint32_t* loadedPose, int loadedCount, int* season6ToLoaded);
+
+// Assigns a Season 6 action only when its coarse pose occurs once in the
+// reference and once in the file. Unmatched entries are left at -1.
+// Returns how many actions were assigned.
+int MapSeason6PlayerUniquePoses(const std::uint32_t* loadedPose, int loadedCount, int* season6ToLoaded);
+
+int Season6IdleActionIndex(int idleSlot);
+
+void CopySeason6IdlePose(int idleSlot, std::int16_t* destination, int count);
+
+int PlayerPoseDistance(const std::int16_t* left, const std::int16_t* right, int count);
+
+// Fills idle slots that are still -1 with a low-travel clip near that Season 6
+// idle. loadedAngles is loadedCount poses of kSeason6IdlePoseAngles.
+// Returns how many idles were placed.
+int PlaceSeason6IdleClips(const std::int16_t* loadedAngles, const float* travel, int loadedCount,
+                          int* season6ToLoaded);
+
+// Fills -1 entries. A free Season 6 index keeps the clip already stored there.
+void CompleteSeason6ActionMap(int* season6ToLoaded, int loadedCount);
 
 }
