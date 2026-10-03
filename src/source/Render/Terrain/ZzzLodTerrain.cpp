@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "Render/Terrain/TerrainContainer.h"
+#include "Render/Terrain/WorldIdMap.h"
 #include "Core/Utilities/Log/MuLogger.h"
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
@@ -150,16 +151,25 @@ void LogTerrainIssue(const wchar_t* fileName, const std::string& error)
     MU_LOG_ERROR(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(fileName), error);
 }
 
-int AcceptLoadedTerrainWorld(const wchar_t* fileName, const char* kind, bool season21, int embeddedMapNumber,
-                             int clientWorld)
+Render::Terrain::TerrainWorldResolution ResolveLoadedTerrainWorld(const wchar_t* fileName, const char* kind,
+                                                                   bool season21, Render::Terrain::TerrainIdKind idKind,
+                                                                   int embeddedMapNumber, int clientWorld)
 {
+    const Render::Terrain::TerrainWorldResolution resolution = Render::Terrain::ResolveTerrainWorld(
+        season21, idKind, embeddedMapNumber, clientWorld);
+    if (!resolution.accepted)
+    {
+        MU_LOG_ERROR(mu::log::Get("data"), "{} terrain {} {} embedded id {} does not map to world {}",
+                     season21 ? "Season 21" : "Season 6", kind, mu_wchar_to_utf8(fileName), embeddedMapNumber,
+                     clientWorld);
+        return resolution;
+    }
     if (season21)
     {
-        MU_LOG_INFO(mu::log::Get("data"),
-                    "Loaded Season 21 terrain {} {} (embedded id {}, client world {})",
-                    kind, mu_wchar_to_utf8(fileName), embeddedMapNumber, clientWorld);
+        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain {} {} (embedded id {} -> world {})", kind,
+                    mu_wchar_to_utf8(fileName), embeddedMapNumber, resolution.world);
     }
-    return Render::Terrain::AcceptedTerrainWorld(season21, embeddedMapNumber, clientWorld);
+    return resolution;
 }
 
 } // namespace
@@ -186,6 +196,14 @@ int OpenTerrainAttribute(wchar_t* FileName, int clientWorld)
     {
         LogTerrainIssue(FileName, document.error);
         return (-1);
+    }
+
+    const Render::Terrain::TerrainWorldResolution resolution = ResolveLoadedTerrainWorld(
+        FileName, "attributes", document.season21, Render::Terrain::TerrainIdKind::Attribute, document.mapNumber,
+        clientWorld);
+    if (!resolution.accepted)
+    {
+        return resolution.world;
     }
 
     static_assert(Render::Terrain::kTerrainGrid == TERRAIN_SIZE);
@@ -224,7 +242,7 @@ int OpenTerrainAttribute(wchar_t* FileName, int clientWorld)
         MU_LOG_WARN(mu::log::Get("data"), "{} attribute header does not match Season 6 checks; using it anyway",
                     mu_wchar_to_utf8(FileName));
     }
-    return AcceptLoadedTerrainWorld(FileName, "attributes", document.season21, document.mapNumber, clientWorld);
+    return resolution.world;
 }
 
 bool SaveTerrainAttribute(wchar_t* FileName, int iMap)
@@ -327,6 +345,13 @@ int OpenTerrainMapping(wchar_t* FileName, int clientWorld) {
         return -1;
     }
 
+    const Render::Terrain::TerrainWorldResolution resolution = ResolveLoadedTerrainWorld(
+        FileName, "map", document.season21, Render::Terrain::TerrainIdKind::Map, document.mapNumber, clientWorld);
+    if (!resolution.accepted)
+    {
+        return resolution.world;
+    }
+
     std::memcpy(TerrainMappingLayer1, document.layer1.data(), document.layer1.size());
     std::memcpy(TerrainMappingLayer2, document.layer2.data(), document.layer2.size());
     for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; i++) {
@@ -338,7 +363,7 @@ int OpenTerrainMapping(wchar_t* FileName, int clientWorld) {
         TerrainGrassEnable = false;
     }
 
-    return AcceptLoadedTerrainWorld(FileName, "map", document.season21, document.mapNumber, clientWorld);
+    return resolution.world;
 }
 
 bool SaveTerrainMapping(wchar_t* FileName, int iMapNumber)

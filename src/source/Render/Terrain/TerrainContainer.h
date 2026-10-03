@@ -74,12 +74,4 @@ TerrainMapDocument DecodeTerrainMap(const std::uint8_t* bytes, std::size_t size)
 TerrainAttributeDocument DecodeTerrainAttribute(const std::uint8_t* bytes, std::size_t size);
 TerrainObjectDocument DecodeTerrainObjects(const std::uint8_t* bytes, std::size_t size);
 
-// Season 21 EncTerrain stores an id that is not the client world folder index
-// (World34 shipped map id 167 and attribute id 58). A successful decode belongs
-// to the client world that requested the file. kUnspecifiedClientWorld keeps
-// the embedded id for callers that do not know the world.
-constexpr int kUnspecifiedClientWorld = -1;
-
-int AcceptedTerrainWorld(bool season21, int embeddedMapNumber, int clientWorld);
-
 }

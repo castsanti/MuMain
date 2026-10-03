@@ -5052,11 +5052,16 @@ int OpenObjectsEnc(wchar_t* FileName, int clientWorld)
     {
         MU_LOG_WARN(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(FileName), document.error);
     }
+    if (clientWorld >= 0 && document.mapNumber != clientWorld)
+    {
+        MU_LOG_ERROR(mu::log::Get("data"), "terrain objects {} embedded id {} does not match world {}",
+                     mu_wchar_to_utf8(FileName), document.mapNumber, clientWorld);
+        return document.mapNumber;
+    }
     if (document.season21)
     {
-        MU_LOG_INFO(mu::log::Get("data"),
-                    "Loaded Season 21 terrain objects {} (embedded id {}, client world {})",
-                    mu_wchar_to_utf8(FileName), document.mapNumber, clientWorld);
+        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain objects {} (embedded id {})",
+                    mu_wchar_to_utf8(FileName), document.mapNumber);
     }
 
     g_iTotalObj = static_cast<int>(document.objects.size());
@@ -5069,7 +5074,7 @@ int OpenObjectsEnc(wchar_t* FileName, int clientWorld)
         CreateObject(object.type, position, angle, object.scale);
     }
 
-    return Render::Terrain::AcceptedTerrainWorld(document.season21, document.mapNumber, clientWorld);
+    return document.mapNumber;
 }
 
 bool SaveObjects(wchar_t* FileName, int iMapNumber)

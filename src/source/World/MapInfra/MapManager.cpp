@@ -1178,17 +1178,20 @@ namespace
 
 constexpr int kTerrainMismatchTextCapacity = 256;
 
-void LogTerrainWorldMismatch(const wchar_t* fileName, int mapNumber, int clientWorld)
+bool RejectTerrainWorldMismatch(const wchar_t* fileName, int mapNumber, int clientWorld)
 {
-    if (mapNumber < 0 || mapNumber == clientWorld)
+    if (mapNumber == -1 || mapNumber == clientWorld)
     {
-        return;
+        return false;
     }
 
     wchar_t text[kTerrainMismatchTextCapacity];
     mu_swprintf(text, L"%ls file map number %d does not match world %d.", fileName, mapNumber, clientWorld);
     g_ErrorReport.Write(text);
     g_ErrorReport.Write(L"\r\n");
+    MessageBox(g_hWnd, text, NULL, MB_OK);
+    SendMessage(g_hWnd, WM_DESTROY, 0, 0);
+    return true;
 }
 
 } // namespace
@@ -1247,7 +1250,10 @@ void CMapManager::LoadWorld(int Map)
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.map", WorldName, iMapWorld);
 
     int iResult = OpenTerrainMapping(FileName, iMapWorld);
-    LogTerrainWorldMismatch(FileName, iResult, iMapWorld);
+    if (RejectTerrainWorldMismatch(FileName, iResult, iMapWorld))
+    {
+        return;
+    }
 
     if (this->WorldActive == WD_73NEW_LOGIN_SCENE)
     {
@@ -1301,12 +1307,18 @@ void CMapManager::LoadWorld(int Map)
             mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.att", WorldName, iMapWorld);
         }
     iResult = OpenTerrainAttribute(FileName, iMapWorld);
-    LogTerrainWorldMismatch(FileName, iResult, iMapWorld);
+    if (RejectTerrainWorldMismatch(FileName, iResult, iMapWorld))
+    {
+        return;
+    }
 
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.obj", WorldName, iMapWorld);
 
     iResult = OpenObjectsEnc(FileName, iMapWorld);
-    LogTerrainWorldMismatch(FileName, iResult, iMapWorld);
+    if (RejectTerrainWorldMismatch(FileName, iResult, iMapWorld))
+    {
+        return;
+    }
 
     mu_swprintf(FileName, L"%ls\\TerrainHeight.bmp", WorldName);
     if (IsTerrainHeightExtMap(this->WorldActive) == true)

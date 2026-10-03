@@ -10,6 +10,7 @@ mu_add_test(
     SOURCES
         test_terrain_container.cpp
         ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/TerrainContainer.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/WorldIdMap.cpp
 )
 
 mu_add_test(

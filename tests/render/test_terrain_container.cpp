@@ -8,6 +8,7 @@
 #include "Core/Globals/_crypt.h"
 #include "Render/Models/MapFileCrypt.h"
 #include "Render/Terrain/TerrainContainer.h"
+#include "Render/Terrain/WorldIdMap.h"
 
 #include <cstdint>
 #include <cstring>
@@ -122,27 +123,53 @@ TEST_CASE("Season 21 object list stops at the end of the buffer")
     CHECK(document.error.find("extends past") != std::string::npos);
 }
 
-TEST_CASE("Season 21 terrain id is the client world that requested the file")
+TEST_CASE("Season 21 terrain ids map only through the world table")
 {
-    CHECK(AcceptedTerrainWorld(true, 167, 34) == 34);
-    CHECK(AcceptedTerrainWorld(true, 58, 34) == 34);
-    CHECK(AcceptedTerrainWorld(false, 33, 34) == 33);
-    CHECK(AcceptedTerrainWorld(true, 167, kUnspecifiedClientWorld) == 167);
+    const TerrainWorldResolution map34 =
+        ResolveTerrainWorld(true, TerrainIdKind::Map, 167, 34);
+    CHECK(map34.accepted);
+    CHECK(map34.world == 34);
+
+    const TerrainWorldResolution attribute34 =
+        ResolveTerrainWorld(true, TerrainIdKind::Attribute, 58, 34);
+    CHECK(attribute34.accepted);
+    CHECK(attribute34.world == 34);
+
+    const TerrainWorldResolution wrongWorld =
+        ResolveTerrainWorld(true, TerrainIdKind::Map, 167, 35);
+    CHECK_FALSE(wrongWorld.accepted);
+    CHECK(wrongWorld.world == 167);
+
+    const TerrainWorldResolution unknown =
+        ResolveTerrainWorld(true, TerrainIdKind::Map, 99, 34);
+    CHECK_FALSE(unknown.accepted);
+    CHECK(unknown.world == 99);
+
+    const TerrainWorldResolution attributeAsMap =
+        ResolveTerrainWorld(true, TerrainIdKind::Map, 58, 34);
+    CHECK_FALSE(attributeAsMap.accepted);
+
+    const TerrainWorldResolution season6Match = ResolveTerrainWorld(false, TerrainIdKind::Map, 34, 34);
+    CHECK(season6Match.accepted);
+    CHECK(season6Match.world == 34);
+
+    const TerrainWorldResolution season6Mismatch = ResolveTerrainWorld(false, TerrainIdKind::Map, 33, 34);
+    CHECK_FALSE(season6Mismatch.accepted);
+    CHECK(season6Mismatch.world == 33);
 
     const std::vector<std::uint8_t> mapFile = WithSeason21Header("MAP", MapCipher(167, 9));
     const TerrainMapDocument map = DecodeTerrainMap(mapFile.data(), mapFile.size());
     REQUIRE(map.ok);
-    CHECK(map.season21);
     CHECK(map.mapNumber == 167);
     CHECK(map.layer1.front() == 9);
-    CHECK(AcceptedTerrainWorld(map.season21, map.mapNumber, 34) == 34);
+    CHECK(ResolveTerrainWorld(map.season21, TerrainIdKind::Map, map.mapNumber, 34).accepted);
 
     const std::vector<std::uint8_t> attributeFile = WithSeason21Header("ATT", AttributeCipher(58, 5));
     const TerrainAttributeDocument attribute = DecodeTerrainAttribute(attributeFile.data(), attributeFile.size());
     REQUIRE(attribute.ok);
     CHECK(attribute.mapNumber == 58);
     CHECK(attribute.walls.front() == 5);
-    CHECK(AcceptedTerrainWorld(attribute.season21, attribute.mapNumber, 34) == 34);
+    CHECK(ResolveTerrainWorld(attribute.season21, TerrainIdKind::Attribute, attribute.mapNumber, 34).world == 34);
 }
 
 TEST_CASE("a Season 21 magic with the wrong payload size fails soft")
