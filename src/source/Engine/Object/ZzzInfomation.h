@@ -95,32 +95,7 @@ public:
                                     int& iAddEnergyExValues, int& iAddCharismaExValues);
 };
 
-inline DWORD GenerateCheckSum2(const BYTE* pbyBuffer, DWORD dwSize, WORD wKey)
-{
-    DWORD dwKey = (DWORD)wKey;
-    DWORD dwResult = dwKey << 9;
-    for (DWORD dwChecked = 0; dwChecked <= dwSize - 4; dwChecked += 4)
-    {
-        DWORD dwTemp;
-        memcpy(&dwTemp, pbyBuffer + dwChecked, sizeof(DWORD));
-
-        switch ((dwChecked / 4 + wKey) % 2)
-        {
-        case 0:
-            dwResult ^= dwTemp;
-            break;
-        case 1:
-            dwResult += dwTemp;
-            break;
-        }
-        if (0 == (dwChecked % 16))
-        {
-            dwResult ^= ((dwKey + dwResult) >> ((dwChecked / 4) % 8 + 1));
-        }
-    }
-
-    return (dwResult);
-}
+#include "Core/Utilities/Checksum.h"
 
 bool IsCepterItem(int iType);
 extern CHARACTER_MACHINE* CharacterMachine;

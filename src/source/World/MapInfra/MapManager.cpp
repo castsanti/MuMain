@@ -1231,12 +1231,9 @@ void CMapManager::LoadWorld(int Map)
     if (iMapWorld != iResult && -1 != iResult)
     {
         wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file corrupted.", FileName);
+        mu_swprintf(Text, L"%ls file map number %d does not match world %d.", FileName, iResult, iMapWorld);
         g_ErrorReport.Write(Text);
         g_ErrorReport.Write(L"\r\n");
-        MessageBox(g_hWnd, Text, NULL, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
-        return;
     }
 
     if (this->WorldActive == WD_73NEW_LOGIN_SCENE)
@@ -1294,12 +1291,9 @@ void CMapManager::LoadWorld(int Map)
     if (iMapWorld != iResult && -1 != iResult)
     {
         wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file corrupted.", FileName);
+        mu_swprintf(Text, L"%ls file map number %d does not match world %d.", FileName, iResult, iMapWorld);
         g_ErrorReport.Write(Text);
         g_ErrorReport.Write(L"\r\n");
-        MessageBox(g_hWnd, Text, NULL, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
-        return;
     }
 
     mu_swprintf(FileName, L"Data\\%ls\\EncTerrain%d.obj", WorldName, iMapWorld);
@@ -1308,12 +1302,9 @@ void CMapManager::LoadWorld(int Map)
     if (iMapWorld != iResult && -1 != iResult)
     {
         wchar_t Text[256];
-        mu_swprintf(Text, L"%ls file corrupted.", FileName);
+        mu_swprintf(Text, L"%ls file map number %d does not match world %d.", FileName, iResult, iMapWorld);
         g_ErrorReport.Write(Text);
         g_ErrorReport.Write(L"\r\n");
-        MessageBox(g_hWnd, Text, NULL, MB_OK);
-        SendMessage(g_hWnd, WM_DESTROY, 0, 0);
-        return;
     }
 
     mu_swprintf(FileName, L"%ls\\TerrainHeight.bmp", WorldName);

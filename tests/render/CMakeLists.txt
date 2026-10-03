@@ -6,6 +6,13 @@ mu_add_test(
 )
 
 mu_add_test(
+    NAME test_terrain_container
+    SOURCES
+        test_terrain_container.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/Render/Terrain/TerrainContainer.cpp
+)
+
+mu_add_test(
     NAME frame_pixel_readback_tests
     SOURCES
         test_frame_pixel_readback.cpp

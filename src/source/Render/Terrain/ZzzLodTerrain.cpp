@@ -3,6 +3,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "Render/Terrain/TerrainContainer.h"
+#include "Core/Utilities/Log/MuLogger.h"
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
 #include <OpenGL/glu.h>
@@ -116,6 +118,40 @@ void ExitProgram()
 }
 
 
+namespace
+{
+
+std::vector<std::uint8_t> ReadEntireFile(FILE* file)
+{
+    if (std::fseek(file, 0, SEEK_END) != 0)
+    {
+        return {};
+    }
+    const long fileSize = std::ftell(file);
+    if (fileSize < 0 || std::fseek(file, 0, SEEK_SET) != 0)
+    {
+        return {};
+    }
+
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
+    if (fileSize == 0)
+    {
+        return bytes;
+    }
+    if (std::fread(bytes.data(), 1, bytes.size(), file) != bytes.size())
+    {
+        return {};
+    }
+    return bytes;
+}
+
+void LogTerrainIssue(const wchar_t* fileName, const std::string& error)
+{
+    MU_LOG_ERROR(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(fileName), error);
+}
+
+} // namespace
+
 int OpenTerrainAttribute(wchar_t* FileName)
 {
     FILE* fp = _wfopen(FileName, L"rb");
@@ -129,98 +165,59 @@ int OpenTerrainAttribute(wchar_t* FileName)
         SendMessage(g_hWnd, WM_DESTROY, 0, 0);
         return (-1);
     }
-    // Read file data
-    fseek(fp, 0, SEEK_END);
-    long file_size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    auto* file_data = new unsigned char[file_size];
-    fread(file_data, file_size, 1, fp);
 
-    // Decrypt file data
-    int iSize = MapFileDecrypt(NULL, file_data, file_size);
-    auto* decrypted_data = new unsigned char[iSize];
-    MapFileDecrypt(decrypted_data, file_data, file_size);
-    delete[] file_data;
-
-    // Check file size
-    bool extAtt = false;
-    if (iSize != (TERRAIN_SIZE * TERRAIN_SIZE + 4) && iSize != (TERRAIN_SIZE * TERRAIN_SIZE * sizeof(WORD) + 4))
+    const std::vector<std::uint8_t> file = ReadEntireFile(fp);
+    std::fclose(fp);
+    const Render::Terrain::TerrainAttributeDocument document =
+        Render::Terrain::DecodeTerrainAttribute(file.data(), file.size());
+    if (!document.ok)
     {
-        delete[] decrypted_data;
+        LogTerrainIssue(FileName, document.error);
         return (-1);
     }
-    if (iSize == (TERRAIN_SIZE * TERRAIN_SIZE * sizeof(WORD) + 4))
+
+    static_assert(Render::Terrain::kTerrainGrid == TERRAIN_SIZE);
+    for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; ++i)
     {
-        extAtt = true;
+        TerrainWall[i] = document.walls[static_cast<std::size_t>(i)];
     }
 
-    // Extract file header
-    BuxConvert(decrypted_data, iSize);
-    BYTE Version = decrypted_data[0];
-    int iMap = decrypted_data[1];
-    BYTE Width = decrypted_data[2];
-    BYTE Height = decrypted_data[3];
-
-    // Extract terrain attribute data
-    if (!extAtt)
-    {
-        unsigned char TWall[TERRAIN_SIZE * TERRAIN_SIZE];
-        memcpy(TWall, &decrypted_data[4], TERRAIN_SIZE * TERRAIN_SIZE);
-
-        for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; ++i)
-        {
-            TerrainWall[i] = TWall[i];
-        }
-    }
-    else
-    {
-        memcpy(TerrainWall, &decrypted_data[4], TERRAIN_SIZE * TERRAIN_SIZE * sizeof(WORD));
-    }
-
-    delete[] decrypted_data;
-
-    // Check file header
-    bool Error = false;
-    if (Version != 0 || Width != 255 || Height != 255)
-    {
-        Error = true;
-    }
-
-    // Check active world
+    bool suspect = document.version != 0 || document.width != 255 || document.height != 255;
     switch (gMapManager.WorldActive)
     {
     case WD_0LORENCIA:
-        if (TerrainWall[123 * TERRAIN_SIZE + 135] != 5) Error = true;
+        if (TerrainWall[123 * TERRAIN_SIZE + 135] != 5) suspect = true;
         break;
     case WD_1DUNGEON:
-        if (TerrainWall[120 * TERRAIN_SIZE + 227] != 4) Error = true;
+        if (TerrainWall[120 * TERRAIN_SIZE + 227] != 4) suspect = true;
         break;
     case WD_2DEVIAS:
-        if (TerrainWall[55 * TERRAIN_SIZE + 208] != 5) Error = true;
+        if (TerrainWall[55 * TERRAIN_SIZE + 208] != 5) suspect = true;
         break;
     case WD_3NORIA:
-        if (TerrainWall[119 * TERRAIN_SIZE + 186] != 5) Error = true;
+        if (TerrainWall[119 * TERRAIN_SIZE + 186] != 5) suspect = true;
         break;
     case WD_4LOSTTOWER:
-        if (TerrainWall[75 * TERRAIN_SIZE + 193] != 5) Error = true;
+        if (TerrainWall[75 * TERRAIN_SIZE + 193] != 5) suspect = true;
         break;
     }
 
     for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; i++)
     {
         TerrainWall[i] = TerrainWall[i] & 0xFF;
-        if (TerrainWall[i] >= 128)
-            Error = true;
     }
 
-    if (Error)
+    if (suspect)
     {
-        ExitProgram();
-        return (-1);
+        MU_LOG_WARN(mu::log::Get("data"), "{} attribute header does not match Season 6 checks; using it anyway",
+                    mu_wchar_to_utf8(FileName));
+    }
+    if (document.season21)
+    {
+        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain attributes {}", mu_wchar_to_utf8(FileName));
     }
 
-    fclose(fp);
-    return iMap;
+    return document.mapNumber;
 }
 
 bool SaveTerrainAttribute(wchar_t* FileName, int iMap)
@@ -314,38 +311,26 @@ int OpenTerrainMapping(wchar_t* FileName) {
         return -1;
     }
 
-    fseek(fp, 0, SEEK_END);
-    int EncBytes = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    auto* EncData = new unsigned char[EncBytes];
-    fread(EncData, 1, EncBytes, fp);
-    fclose(fp);
-
-    int DataBytes = MapFileDecrypt(NULL, EncData, EncBytes);
-    auto* Data = new unsigned char[DataBytes];
-    MapFileDecrypt(Data, EncData, EncBytes);
-    delete[] EncData;
-
-    int DataPtr = 0;
-    DataPtr += 1;
-
-    int iMapNumber = static_cast<int>(*reinterpret_cast<BYTE*>(Data + DataPtr));
-    DataPtr += 1;
-
-    memcpy(TerrainMappingLayer1, Data + DataPtr, 256 * 256);
-    DataPtr += 256 * 256;
-
-    memcpy(TerrainMappingLayer2, Data + DataPtr, 256 * 256);
-    DataPtr += 256 * 256;
-
-    for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; i++) {
-        BYTE Alpha = *(Data + DataPtr);
-        DataPtr += 1;
-        TerrainMappingAlpha[i] = static_cast<float>(Alpha) / 255.f;
+    const std::vector<std::uint8_t> file = ReadEntireFile(fp);
+    std::fclose(fp);
+    const Render::Terrain::TerrainMapDocument document = Render::Terrain::DecodeTerrainMap(file.data(), file.size());
+    if (!document.ok)
+    {
+        LogTerrainIssue(FileName, document.error);
+        return -1;
     }
 
-    delete[] Data;
+    std::memcpy(TerrainMappingLayer1, document.layer1.data(), document.layer1.size());
+    std::memcpy(TerrainMappingLayer2, document.layer2.data(), document.layer2.size());
+    for (int i = 0; i < TERRAIN_SIZE * TERRAIN_SIZE; i++) {
+        TerrainMappingAlpha[i] = static_cast<float>(document.alpha[static_cast<std::size_t>(i)]) / 255.f;
+    }
+    if (document.season21)
+    {
+        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain map {}", mu_wchar_to_utf8(FileName));
+    }
+
+    const int iMapNumber = document.mapNumber;
 
     TerrainGrassEnable = true;
 

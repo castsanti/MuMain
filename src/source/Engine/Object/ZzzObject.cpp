@@ -1,6 +1,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "Render/Terrain/TerrainContainer.h"
+#include "Core/Utilities/Log/MuLogger.h"
 #include "Camera/CameraMove.h"
 #include "Render/Textures/ZzzOpenglUtil.h"
 #include "Render/Models/ZzzBMD.h"
@@ -5020,45 +5022,52 @@ int OpenObjectsEnc(wchar_t* FileName)
         SendMessage(g_hWnd, WM_DESTROY, 0, 0);
         return (-1);
     }
-    fseek(fp, 0, SEEK_END);
-    int EncBytes = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    auto* EncData = new unsigned char[EncBytes];
-    fread(EncData, 1, EncBytes, fp);
-    fclose(fp);
-
-    int DataBytes = MapFileDecrypt(NULL, EncData, EncBytes);
-    auto* Data = new unsigned char[DataBytes];
-    MapFileDecrypt(Data, EncData, EncBytes);
-    delete[] EncData;
-
-    int DataPtr = 0;
-    DataPtr += 1;
-    int iMapNumber = static_cast<int>(Data[DataPtr]);
-    DataPtr += 1;
-    short Count = 0;
-    memcpy(&Count, Data + DataPtr, sizeof(Count));
-    DataPtr += sizeof(Count);
-    g_iTotalObj = Count;
-    for (int i = 0; i < Count; i++)
+    if (std::fseek(fp, 0, SEEK_END) != 0)
     {
-        vec3_t Position;
-        vec3_t Angle;
-        short Type = 0;
-        memcpy(&Type, Data + DataPtr, sizeof(Type));
-        DataPtr += sizeof(Type);
-        memcpy(Position, Data + DataPtr, sizeof(vec3_t));
-        DataPtr += sizeof(vec3_t);
-        memcpy(Angle, Data + DataPtr, sizeof(vec3_t));
-        DataPtr += sizeof(vec3_t);
-        float Scale = 0.f;
-        memcpy(&Scale, Data + DataPtr, sizeof(Scale));
-        DataPtr += sizeof(Scale);
-        CreateObject(Type, Position, Angle, Scale);
+        std::fclose(fp);
+        return (-1);
     }
-    delete[] Data;
+    const long encBytes = std::ftell(fp);
+    if (encBytes < 0 || std::fseek(fp, 0, SEEK_SET) != 0)
+    {
+        std::fclose(fp);
+        return (-1);
+    }
+    std::vector<std::uint8_t> encData(static_cast<std::size_t>(encBytes));
+    if (encBytes > 0 && std::fread(encData.data(), 1, encData.size(), fp) != encData.size())
+    {
+        std::fclose(fp);
+        return (-1);
+    }
+    std::fclose(fp);
 
-    return iMapNumber;
+    const Render::Terrain::TerrainObjectDocument document =
+        Render::Terrain::DecodeTerrainObjects(encData.data(), encData.size());
+    if (!document.ok && document.objects.empty())
+    {
+        MU_LOG_ERROR(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(FileName), document.error);
+        return (-1);
+    }
+    if (!document.error.empty())
+    {
+        MU_LOG_WARN(mu::log::Get("data"), "{} - {}", mu_wchar_to_utf8(FileName), document.error);
+    }
+    if (document.season21)
+    {
+        MU_LOG_INFO(mu::log::Get("data"), "Loaded Season 21 terrain objects {}", mu_wchar_to_utf8(FileName));
+    }
+
+    g_iTotalObj = static_cast<int>(document.objects.size());
+    for (const Render::Terrain::TerrainObjectRecord& object : document.objects)
+    {
+        vec3_t position;
+        vec3_t angle;
+        VectorCopy(object.position, position);
+        VectorCopy(object.angle, angle);
+        CreateObject(object.type, position, angle, object.scale);
+    }
+
+    return document.mapNumber;
 }
 
 bool SaveObjects(wchar_t* FileName, int iMapNumber)

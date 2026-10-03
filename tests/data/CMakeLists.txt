@@ -1,4 +1,12 @@
 mu_add_test(
+    NAME test_local_bmd_scripts
+    SOURCES
+        test_local_bmd_scripts.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/GameLogic/Items/ItemSetTypeScript.cpp
+        ${CMAKE_SOURCE_DIR}/src/source/UI/NewUI/HUD/MasterSkillTreeScript.cpp
+)
+
+mu_add_test(
     NAME test_item_database
     SOURCES
         test_item_database.cpp
